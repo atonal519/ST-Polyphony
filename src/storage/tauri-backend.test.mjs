@@ -7,11 +7,11 @@ const API = '/api/plugins/st-bainiaodata/v1/';
 const sortKeys = value => Array.isArray(value) ? value.map(sortKeys)
   : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, sortKeys(value[key])])) : value;
 function createNativeStore() {
-  const files = new Map(), calls = [];
+  const files = new Map(), reads = [];
   const id = ({ namespace, table = 'main', key }) => `${namespace}/${table}/${key}`;
-  return { files, calls, api: {
-    async tryGetJson(options) { calls.push('get'); const raw = files.get(id(options)); return raw === undefined ? { found: false } : { found: true, value: sortKeys(JSON.parse(raw)) }; },
-    async setJson(options) { calls.push('set'); files.set(id(options), JSON.stringify(options.value)); },
+  return { files, reads, api: {
+    async tryGetJson(options) { reads.push(id(options)); const raw = files.get(id(options)); return raw === undefined ? { found: false } : { found: true, value: sortKeys(JSON.parse(raw)) }; },
+    async setJson(options) { files.set(id(options), JSON.stringify(options.value)); },
     async deleteJson(options) { files.delete(id(options)); },
     async listKeys({ namespace, table = 'main' }) { const prefix = `${namespace}/${table}/`; return [...files.keys()].filter(key => key.startsWith(prefix)).map(key => key.slice(prefix.length)); },
     async listTables({ namespace }) { return [...new Set([...files.keys()].filter(key => key.startsWith(`${namespace}/`)).map(key => key.split('/')[1]))]; },
@@ -92,6 +92,51 @@ test('record IDs skip unreadable slots and follow the server file-name order', a
   const ids = await send(fetch, 'record-ids/st-dollars/list');
   assert.equal(ids.status, 200);
   assert.deepEqual(ids.payload, ['a', 'b', 'a-1'].map(id => `${id}.json`).sort((x, y) => x.localeCompare(y)).map(name => name.slice(0, -5)));
+});
+
+test('the media directory survives restart without reading any indexed article bodies', async () => {
+  const { store, globalRef } = createGlobal(), fetch = createTauriBackendFetch({ globalRef });
+  const route = 'record-ids/st-dollars/npc-media-fixture';
+  await send(fetch, 'record-batch/st-dollars/npc-media-fixture', 'PUT', { records: ['a', 'b'].map(recordId => ({
+    recordId, data: { body: '旧稿正文'.repeat(800) }, expectedRevision: 0,
+  })) });
+  await send(fetch, 'records/st-dollars/npc-media-fixture/c', 'PUT', { data: { body: '新稿' }, expectedRevision: 0 });
+  const reopened = createTauriBackendFetch(createGlobal(store));
+  store.reads.length = 0;
+  assert.deepEqual(await send(reopened, route), { status: 200, ok: true, payload: ['a', 'b', 'c'] });
+  assert.equal(store.reads.filter(path => path.startsWith('qqj-bainiao-v1/')).length, 0);
+  assert.equal(store.reads.length, 1);
+});
+
+test('legacy media slots are reconciled incrementally when some reads fail, without losing saved records', async () => {
+  const { store, globalRef } = createGlobal(), fetch = createTauriBackendFetch({ globalRef });
+  const route = 'record-ids/st-dollars/npc-media-legacy';
+  const setJson = store.api.setJson;
+  store.api.setJson = async options => {
+    if (options.namespace !== 'qqj-bainiao-v1') throw Error('index temporarily unavailable');
+    return setJson(options);
+  };
+  for (const id of ['a', 'b']) {
+    const saved = await send(fetch, `records/st-dollars/npc-media-legacy/${id}`, 'PUT', { data: id, expectedRevision: 0 });
+    assert.equal(saved.status, 200);
+  }
+  store.api.setJson = setJson;
+  const tryGet = store.api.tryGetJson;
+  let unavailable = new Set(store.files.keys());
+  store.api.tryGetJson = async options => {
+    if (unavailable.has(`${options.namespace}/${options.table}/${options.key}`)) throw Error('native read failed');
+    return tryGet(options);
+  };
+  assert.equal((await send(fetch, route)).status, 503);
+  unavailable.delete([...unavailable][0]);
+  assert.deepEqual(await send(fetch, route), { status: 206, ok: true, payload: ['a'] });
+  unavailable.clear();
+  store.reads.length = 0;
+  assert.deepEqual(await send(fetch, route), { status: 200, ok: true, payload: ['a', 'b'] });
+  assert.equal(store.reads.filter(path => path.startsWith('qqj-bainiao-v1/')).length, 1);
+  const [deleted] = [...store.files.keys()];
+  store.files.delete(deleted);
+  assert.deepEqual((await send(fetch, route)).payload, ['b']);
 });
 
 test('concurrent writers of one record are serialized and only one wins the revision', async () => {

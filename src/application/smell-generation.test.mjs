@@ -4,6 +4,7 @@ import test from 'node:test';
 const {createSmellGeneration}=await import('./smell-generation.ts');
 const {drawSmellDice}=await import('../simulation/smell.ts');
 const {createPublicMessageRepository}=await import('../storage/public-message-repository.ts');
+const {createBainiaoClient}=await import('../storage/bainiao-client.ts');
 
 const story={status:'ready',message:'',throughSeq:12,turns:[{seq:12,isUser:false,text:'东棚旁的几家食铺开门，路面还带着雨水。'}],source:{kind:'chat',id:'test-story',label:'正文'}};
 const note={medium:'纸媒',type:'便签',source:'东棚入口',title:'入口提醒',body:'门口湿滑，走木板。',mode:'created',visibility:'public',sourceSeq:12,assertedPersonIds:[],assertsUser:false};
@@ -21,10 +22,10 @@ test('smell dice draws compact independent options for every public folder',()=>
   assert.doesNotMatch(JSON.stringify(first),/东棚|路况|石板|广播稿/);
 });
 
-function fixture(people=[]){
+function fixture(people=[],mediaRepo){
   const wire={calls:[],profiles:[],writes:[],lists:[],snapshotReads:0,scope:'test',frontier:12,schedule:{everyReplies:2,enabledAfter:null}};
-  const repo={
-    async list(scope){wire.lists.push(scope);return[];},
+  const repo=mediaRepo??{
+    async list(scope){wire.lists.push(scope);return{refs:[],complete:true};},
     async write(scope,window,entries){wire.writes.push({scope,window,entries});return entries.map((entry,index)=>({medium:entry.medium,count:1,recordId:'record-'+index,throughSeq:window.throughSeq,batchKey:'batch',publishedAt:1}));},
   };
   const controller=createSmellGeneration({
@@ -137,10 +138,33 @@ test('automatic cadence starts at enabling and duplicate ready floors cause one 
   assert.equal(wire.calls.length,1);
 });
 
+test('a partial media directory displays usable refs and retries the same chat after native read failures',async()=>{
+  const partial=['smell~8~a~first~1~广播'],all=[...partial,'smell~10~b~second~1~专题'];
+  const replies=[
+    Response.json({error:'storage_error'},{status:503}),
+    Response.json(partial,{status:206}),
+    Response.json(all),
+  ];
+  const client=createBainiaoClient({fetchImpl:async url=>{
+    assert.match(url,/record-ids\/st-dollars\/npc-media-test$/);
+    return replies.shift();
+  }});
+  const {controller}=fixture([],createPublicMessageRepository(client));
+  await controller.refresh();
+  assert.match(controller.view.value.directoryError,/读取.*失败/u);
+  await controller.refresh();
+  assert.deepEqual(controller.view.value.refs.map(ref=>ref.recordId),partial);
+  assert.match(controller.view.value.directoryError,/部分公开消息/u);
+  await controller.refresh();
+  assert.deepEqual(controller.view.value.refs.map(ref=>ref.recordId),all);
+  assert.equal(controller.view.value.directoryError,'');
+  assert.equal(replies.length,0);
+});
+
 test('media records list via IDs only, retain partial saves and stay scoped',async()=>{
   const data=new Map(),operations=[];
   const client={
-    async listRecordIds(collection){operations.push('ids');return [...data.keys()].filter(key=>key.startsWith(collection+'/')).map(key=>key.slice(collection.length+1));},
+    async listRecordIds(collection){operations.push('ids');return {ids:[...data.keys()].filter(key=>key.startsWith(collection+'/')).map(key=>key.slice(collection.length+1)),complete:true};},
     async writeBatch(collection,records){operations.push('write');return records.map(({recordId,data:value},index)=>{
       if(index===1) return {recordId,status:500};
       const envelope={revision:1,data:value};data.set(collection+'/'+recordId,envelope);
@@ -151,8 +175,8 @@ test('media records list via IDs only, retain partial saves and stay scoped',asy
   const repo=createPublicMessageRepository(client);
   const refs=await repo.write('test',{id:'test-run',throughSeq:12},[{...feature,medium:'专题'},radio]);
   assert.equal(refs.length,1);
-  assert.deepEqual(await repo.list('test'),refs);
-  assert.deepEqual(await repo.list('different'),[]);
+  assert.deepEqual(await repo.list('test'),{refs,complete:true});
+  assert.deepEqual(await repo.list('different'),{refs:[],complete:true});
   assert.deepEqual(operations,['write','ids','ids']);
   assert.equal((await repo.read('test',refs))[0].entries[0].body,feature.body);
 });

@@ -10,8 +10,9 @@ function confirmed(row:BainiaoBatchRow|undefined,id:string) {
 export function createPublicMessageRepository(client:Pick<ReturnType<typeof createBainiaoClient>,'listRecordIds'|'readBatch'|'writeBatch'>):PublicMessageRepository {
   return {
     async list(scopeId) {
-      const ids=await client.listRecordIds(collection(scopeId));
-      return ids.flatMap(id=>{const ref=smellRecordRef(id);return ref?[ref]:[];});
+      const {ids,complete}=await client.listRecordIds(collection(scopeId));
+      const refs=ids.flatMap(id=>{const ref=smellRecordRef(id);return ref?[ref]:[];});
+      return {refs,complete};
     },
     async write(scopeId,window,messages,diagnostic) {
       if(!messages.length)return [];

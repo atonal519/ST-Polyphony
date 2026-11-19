@@ -15,7 +15,7 @@ export interface QuestionMaterialRead { status: QuestionMaterialStatus; message:
 export interface QuestionMaterialReader { readForQuestion(request: QuestionMaterialRequest): Promise<QuestionMaterialRead>; readForQuestions?(requests: QuestionMaterialRequest[], input: {throughSeq: number | null}): Promise<QuestionMaterialRead[]> }
 export interface WorldRepository { load(scopeId: string): Promise<{ state: NpcWorldState; revision: number } | null>; save(scopeId: string, state: NpcWorldState, expectedRevision: number | null, diagnostic?:DiagnosticTrace): Promise<{ state: NpcWorldState; revision: number }> }
 export interface PublicMessageRepository {
-  list(scopeId:string):Promise<PublicMessageRef[]>;
+  list(scopeId:string):Promise<{refs:PublicMessageRef[];complete:boolean}>;
   write(scopeId:string,window:{id:string;throughSeq:number},messages:PublicMessageDraft[],diagnostic?:DiagnosticTrace):Promise<PublicMessageRef[]>;
   read(scopeId:string,refs:PublicMessageRef[]):Promise<PublicMessageRecord[]>;
 }

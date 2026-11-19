@@ -16,6 +16,7 @@ const folderTones=new Map([['公告','notice'],['专题','feature'],['副刊','s
 const tone=(medium:string)=>folderTones.get(medium)??(/广播|电台|radio/iu.test(medium)?'radio':/传闻|rumou?r/iu.test(medium)?'rumor':'paper');
 const pageSize=8;
 const generationView=computed(()=>props.generation?.view.value);
+const generationError=computed(()=>generationView.value?.error||(!generationView.value?.busy&&generationView.value?.directoryError)||'');
 const scopeId=computed(()=>(props.generation?generationView.value?.scopeId:props.state.world.id)??null);
 const viewedNotices=shallowRef(new Map<string,string>());
 const noticeKey=(scope:string)=>'st-dollars:smell-viewed:'+scope;
@@ -178,7 +179,7 @@ function keydown(event:KeyboardEvent){
 
 <template>
  <section ref="body" class="bmx-page bmx-smell-page" :class="{'has-folders':active}" role="tabpanel" aria-labelledby="bmx-tab-smell">
-  <p v-if="generationView" class="bmx-page-health" :class="{healthy:!!scopeId&&!generationView.error&&!generationView.busy}" :role="generationView.error?'alert':'status'">{{ generationView.error || generationView.message || (scopeId ? readyLabel : '打开聊天后即可新增公开消息。') }}</p>
+  <p v-if="generationView" class="bmx-page-health" :class="{healthy:!!scopeId&&!generationError&&!generationView.busy}" :role="generationError?'alert':'status'">{{ generationError || generationView.message || (scopeId ? readyLabel : '打开聊天后即可新增公开消息。') }}</p>
   <ModuleHealth v-else :state="state" :development="development" :ready-label="readyLabel"/>
   <SmellFolderHome :folders="folders" :active="active" :enabled="!!panel" :reading="folder?.medium" :scope-id="scopeId" @open="openMedium">
     <button v-if="generation" class="bmx-smell-generate" type="button" :disabled="!enabled||generationView?.busy" @click="generation.generate">

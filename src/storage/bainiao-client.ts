@@ -30,25 +30,25 @@ export function createBainiaoClient({ fetchImpl = defaultFetch, getHeaders = () 
       const message = response.status === 409 ? '数据已被其他更新修改，请重新读取后再推进。' : method !== 'PUT' ? '读取百面相数据失败，请重新打开页面后再试。' : response.status === 0 ? '保存结果暂时无法确认，请重新读取当前数据。' : '保存百面相数据失败，请重新读取当前数据后再决定下一步。';
       throw new StorageError(response.status, code, message);
     }
-    return payload;
+    return {payload,status:response.status};
   }
   const record=(collection:string,id:string)=>`records/st-dollars/${encodeURIComponent(collection)}/${encodeURIComponent(id)}`;
   async function batch(collection:string,method:'POST'|'PUT',body:unknown,diagnostic?:DiagnosticTrace):Promise<BainiaoBatchRow[]> {
-    const payload=await request(`record-batch/st-dollars/${encodeURIComponent(collection)}`,method,body,diagnostic);
+    const {payload}=await request(`record-batch/st-dollars/${encodeURIComponent(collection)}`,method,body,diagnostic);
     if(!Array.isArray(payload))throw new StorageError(200,'invalid_response','白鳥返回的批量结果无法读取。');
     return payload;
   }
   return {
-    async listRecordIds(collection:string):Promise<string[]> {
-      const result=await request('record-ids/st-dollars/'+encodeURIComponent(collection),'GET');
-      if(!Array.isArray(result))throw new StorageError(200,'invalid_response','白鳥返回的消息目录无法读取。');
-      return result.filter((id):id is string=>typeof id==='string');
+    async listRecordIds(collection:string):Promise<{ids:string[];complete:boolean}> {
+      const {payload,status}=await request('record-ids/st-dollars/'+encodeURIComponent(collection),'GET');
+      if(!Array.isArray(payload))throw new StorageError(status,'invalid_response','白鳥返回的消息目录无法读取。');
+      return {ids:payload.filter((id):id is string=>typeof id==='string'),complete:status!==206};
     },
     async get(collection: string, id: string) {
-      try { return await request(record(collection,id),'GET'); }
+      try { return (await request(record(collection,id),'GET')).payload; }
       catch (error) { if (error instanceof StorageError && error.status === 404) return null; throw error; }
     },
-    put(collection: string, id: string, data: unknown, expectedRevision: number, diagnostic?:DiagnosticTrace) { return request(record(collection,id),'PUT',{data,expectedRevision},diagnostic); },
+    async put(collection: string, id: string, data: unknown, expectedRevision: number, diagnostic?:DiagnosticTrace) { return (await request(record(collection,id),'PUT',{data,expectedRevision},diagnostic)).payload; },
     readBatch(collection:string,recordIds:string[]) {return batch(collection,'POST',{recordIds});},
     writeBatch(collection:string,records:Array<{recordId:string;data:unknown;expectedRevision:number}>,diagnostic?:DiagnosticTrace) {return batch(collection,'PUT',{records},diagnostic);},
   };

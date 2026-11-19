@@ -7,12 +7,49 @@
 // plugins share one local BaiNiao store as they share one backend on a server.
 const API_PREFIX = '/api/plugins/st-bainiaodata/v1/';
 const STORAGE_NAMESPACE = 'qqj-bainiao-v1';
+const MEDIA_INDEX_NAMESPACE = 'st-dollars-media-index-v1';
+const RECORD_KEY = /^r-[0-9a-f]{64}$/;
 const LOCKS = Symbol.for('qqj.bainiao.tt.locks.v1');
 const BATCH_LIMIT = 64, BATCH_WRITE_BYTES = 1048576, READ_CONCURRENCY = 8, WRITE_CONCURRENCY = 4;
 const encoder = new TextEncoder();
 const error = (status, message) => Object.assign(new Error(message), { status });
 const abort = signal => { if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError'); };
 const errorCode = status => status === 409 ? 'conflict' : status === 404 ? 'not_found' : status === 400 ? 'validation' : 'storage_error';
+const hasMediaIndex = (namespace, collection) => namespace === 'st-dollars' && collection.startsWith('npc-media-');
+const mediaIndexOptions = table => ({ namespace: MEDIA_INDEX_NAMESPACE, table, key: 'record-ids' });
+
+async function readMediaIndex(store, table) {
+  try {
+    const { found, value } = await store.tryGetJson(mediaIndexOptions(table));
+    if (found && value && typeof value === 'object' && !Array.isArray(value)) {
+      return new Map(Object.entries(value).filter(([key, id]) => RECORD_KEY.test(key) && typeof id === 'string'));
+    }
+  } catch {
+    // The authoritative record keys can reconstruct this derived directory.
+    return null;
+  }
+  return new Map();
+}
+
+// Called with the shared storage lock. A recovered index can be merged with IDs
+// written while the directory was reading the remaining legacy slots.
+async function rememberMediaIds(store, table, entries) {
+  if (!entries.size) return;
+  const index = await readMediaIndex(store, table);
+  if (!index) return;
+  let changed = false;
+  for (const [key, id] of entries) {
+    if (index.get(key) === id) continue;
+    index.set(key, id);
+    changed = true;
+  }
+  if (!changed) return;
+  try {
+    await store.setJson({ ...mediaIndexOptions(table), value: Object.fromEntries(index) });
+  } catch {
+    // The record is already saved. Its key will be discovered on the next list.
+  }
+}
 
 async function sha256(value, globalRef) {
   const bytes = encoder.encode(String(value));
@@ -160,6 +197,7 @@ export function createTauriBackendFetch({ globalRef = globalThis } = {}) {
     return locked(globalRef, `${STORAGE_NAMESPACE}:${namespace}`, async () => {
       abort(signal);
       const table = await tableFor(namespace, collection), results = new Array(records.length);
+      const indexed = hasMediaIndex(namespace, collection) ? new Map() : null;
       let cursor = 0;
       const worker = async () => {
         while (cursor < records.length) {
@@ -169,6 +207,7 @@ export function createTauriBackendFetch({ globalRef = globalThis } = {}) {
             const key = await keyFor(item.recordId);
             const slot = await read(store, table, key, namespace, collection, item.recordId) ?? emptySlot(namespace, collection, item.recordId);
             results[index] = { recordId: item.recordId, status: 200, envelope: await saveSlot(store, table, key, slot, item, signal) };
+            indexed?.set(key, item.recordId);
           } catch (cause) {
             if (signal?.aborted) throw cause;
             const status = [400, 409].includes(cause?.status) ? cause.status : 500;
@@ -181,30 +220,50 @@ export function createTauriBackendFetch({ globalRef = globalThis } = {}) {
       abort(signal);
       const failed = workers.find(item => item.status === 'rejected');
       if (failed) throw failed.reason;
+      if (indexed) await rememberMediaIds(store, table, indexed);
       return results;
     });
   };
 
   const listRecordIds = async (store, namespace, collection, signal) => {
     const table = await tableFor(namespace, collection), lockName = `${STORAGE_NAMESPACE}:${namespace}`;
-    const keys = await locked(globalRef, lockName, () => store.listKeys({ namespace: STORAGE_NAMESPACE, table }));
-    if (!Array.isArray(keys)) throw error(500, 'Invalid storage listing');
+    const indexMedia = hasMediaIndex(namespace, collection);
+    const { keys, index } = await locked(globalRef, lockName, async () => {
+      const keys = await store.listKeys({ namespace: STORAGE_NAMESPACE, table });
+      if (!Array.isArray(keys)) throw error(500, 'Invalid storage listing');
+      const recordKeys = keys.filter(key => typeof key === 'string' && RECORD_KEY.test(key));
+      const index = indexMedia && recordKeys.length ? await readMediaIndex(store, table) : null;
+      return { keys: recordKeys, index };
+    });
     const ids = [];
-    // Keys are hashes, so the record ID has to be read from each slot. Read a few at a time,
-    // letting queued writes run between groups. Soft-deleted slots are not listed, as on the server;
-    // an unreadable slot is skipped like a stray file instead of failing the whole listing.
-    for (let start = 0; start < keys.length; start += READ_CONCURRENCY) {
+    const missing = keys.filter(key => {
+      const id = index?.get(key);
+      if (id === undefined) return true;
+      ids.push(id);
+      return false;
+    });
+    const recovered = new Map();
+    let failed = 0;
+    // Recover IDs from unindexed slots in groups so queued writes can run between them.
+    for (let start = 0; start < missing.length; start += READ_CONCURRENCY) {
       abort(signal);
-      await locked(globalRef, lockName, () => Promise.all(keys.slice(start, start + READ_CONCURRENCY).map(async key => {
+      await locked(globalRef, lockName, () => Promise.all(missing.slice(start, start + READ_CONCURRENCY).map(async key => {
         try {
           const slot = await read(store, table, key, namespace, collection);
-          if (slot?.current && key === await keyFor(slot.recordId)) ids.push(slot.recordId);
-        } catch {}
+          if (slot?.current && key === await keyFor(slot.recordId)) {
+            ids.push(slot.recordId);
+            recovered.set(key, slot.recordId);
+          }
+        } catch { failed++; }
       })));
     }
     abort(signal);
+    if (indexMedia && recovered.size) {
+      await locked(globalRef, lockName, () => rememberMediaIds(store, table, recovered));
+    }
+    if (failed && !ids.length) throw error(503, 'Unable to read record directory');
     // Same order as the server, which sorts the `<recordId>.json` file names.
-    return ids.sort((a, b) => `${a}.json`.localeCompare(`${b}.json`));
+    return respond(failed ? 206 : 200, ids.sort((a, b) => `${a}.json`.localeCompare(`${b}.json`)));
   };
 
   const dispatch = async (url, init) => {
@@ -218,16 +277,16 @@ export function createTauriBackendFetch({ globalRef = globalThis } = {}) {
     abort(signal);
     if (parts.length === 1 && parts[0] === 'health' && method === 'GET') {
       await store.listTables({ namespace: STORAGE_NAMESPACE });
-      return { ok: true, plugin: { id: 'st-bainiaodata', name: 'Bainiao Data (TT)', version: '0.1.0-tt' },
+      return respond(200, { ok: true, plugin: { id: 'st-bainiaodata', name: 'Bainiao Data (TT)', version: '0.1.0-tt' },
         api: { current: 1, supported: [1] }, storage: { scope: 'tauritavern-data-root', envelopeSchemaVersion: 1 },
-        capabilities: { records: true, recordBatchRead: true, recordBatchWrite: true, recordIdList: true, optimisticRevision: true } };
+        capabilities: { records: true, recordBatchRead: true, recordBatchWrite: true, recordIdList: true, optimisticRevision: true } });
     }
     if (parts.length < 3) throw error(404, 'Unsupported local backend route');
     const namespace = segment(parts[1]), collection = segment(parts[2]);
     if (namespace === 'system-trash') throw error(400, 'Reserved namespace');
     if (parts[0] === 'record-ids' && parts.length === 3 && method === 'GET') return listRecordIds(store, namespace, collection, signal);
-    if (parts[0] === 'record-batch' && parts.length === 3 && method === 'POST') return readBatch(store, namespace, collection, parseBody(init), signal);
-    if (parts[0] === 'record-batch' && parts.length === 3 && method === 'PUT') return writeBatch(store, namespace, collection, init, signal);
+    if (parts[0] === 'record-batch' && parts.length === 3 && method === 'POST') return respond(200, await readBatch(store, namespace, collection, parseBody(init), signal));
+    if (parts[0] === 'record-batch' && parts.length === 3 && method === 'PUT') return respond(200, await writeBatch(store, namespace, collection, init, signal));
     if (parts[0] === 'records' && parts.length === 4 && ['GET', 'PUT'].includes(method)) {
       const recordId = segment(parts[3]), body = method === 'PUT' ? parseBody(init) : undefined;
       // Reads wait for queued writes of the same namespace, as with the server's write queue.
@@ -237,9 +296,11 @@ export function createTauriBackendFetch({ globalRef = globalThis } = {}) {
         const slot = await read(store, table, key, namespace, collection, recordId);
         if (method === 'GET') {
           if (!slot?.current) throw error(404, 'Record not found');
-          return slot.current;
+          return respond(200, slot.current);
         }
-        return saveSlot(store, table, key, slot ?? emptySlot(namespace, collection, recordId), body, signal);
+        const saved = await saveSlot(store, table, key, slot ?? emptySlot(namespace, collection, recordId), body, signal);
+        if (hasMediaIndex(namespace, collection)) await rememberMediaIds(store, table, new Map([[key, recordId]]));
+        return respond(200, saved);
       });
     }
     throw error(404, 'Unsupported local backend route');
@@ -252,7 +313,7 @@ export function createTauriBackendFetch({ globalRef = globalThis } = {}) {
   };
   return async function tauriBackendFetch(url, init = {}) {
     try {
-      return respond(200, await abortable(() => dispatch(String(url), init), init.signal));
+      return await abortable(() => dispatch(String(url), init), init.signal);
     } catch (cause) {
       // Unknown failures (TT not ready, native exceptions, aborts) reject like a network error.
       if (!Number.isInteger(cause?.status)) throw cause;

@@ -15,8 +15,9 @@ function service(presetName = '原预设'){
  const config=createConfigService(client,()=>presets,pool);
  return{config,client,get record(){return record;},get presets(){return presets;},get writes(){return writes;},set fail(value){fail=value;}};
 }
-async function mount({width=390,scale=.85,presetName}={}){
+async function mount({width=390,scale=.85,presetName,beforeMount}={}){
  const host=createMemoryHost(),state=service(presetName),active=ref(true),refreshKey=ref(0);
+ beforeMount?.(state);
  host.viewport.innerWidth=width;
  host.viewport.visualViewport.width=width;
  host.root.host.style.setProperty('--qqj-ui-scale',String(scale));
@@ -77,6 +78,28 @@ test('real Vue new and copy save create connections without selecting a use; del
   f.query('编辑主模型 API').fire('click');await settle();await f.click('另存为');await f.input('副本名称','副本');await f.click('保存副本');assert.deepEqual(f.state.record,before);assert.equal(f.state.presets.length,4);assert.equal(f.state.presets[3].key,'key-1');
   await f.click('删除');await f.click('确认删除');assert.equal(f.state.presets.some(p=>p.id==='p'),false);assert.equal(f.query('模型名称').value,'model-1');assert.match(f.host.root.textContent,/原输入仍保留/);
  }finally{f.host.cleanup();}
+});
+test('a pending API settings read leaves the shared connection editor usable',async()=>{
+ const gate=Promise.withResolvers();
+ const f=await mount({beforeMount(state){
+  const get=state.client.get;
+  state.client.get=async()=>{await gate.promise;return get();};
+ }});
+ try{
+  assert.equal(f.query('编辑主模型 API').props.disabled,true);
+  assert.notEqual(f.buttons('新增 API')[0].props.disabled,true);
+  await f.click('新增 API');
+  await f.input('预设名称','等待时新增');
+  await f.input('API 地址','https://new.invalid/v1');
+  await f.input('API Key（留空保留已保存 Key）','new-key');
+  await f.input('模型名称','new-model');
+  await f.click('保存');
+  assert.equal(f.query('模型名称'),null);
+  assert.equal(f.state.presets.at(-1).name,'等待时新增');
+  gate.resolve();await settle();
+  assert.equal(f.query('编辑主模型 API').props.disabled,false);
+  assert.equal(f.state.record.data.primaryPresetId,'p');
+ }finally{gate.resolve();f.host.cleanup();}
 });
 test('real model-list draft tool uses captured latest key; search Enter/IME never saves or invokes another tool',async()=>{
  const f=await mount(),previous=globalThis.fetch;let calls=0;

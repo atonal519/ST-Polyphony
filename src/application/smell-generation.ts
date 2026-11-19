@@ -13,6 +13,7 @@ export interface SmellGenerationView {
   busy:boolean;
   message:string;
   error:string;
+  directoryError:string;
 }
 
 interface Dependencies {
@@ -32,7 +33,7 @@ interface Dependencies {
   world():WorldSnapshot;
 }
 
-const blank=(scopeId:string|null,schedule=defaultSmellSchedule):SmellGenerationView=>({scopeId,schedule,refs:[],busy:false,message:'',error:''});
+const blank=(scopeId:string|null,schedule=defaultSmellSchedule):SmellGenerationView=>({scopeId,schedule,refs:[],busy:false,message:'',error:'',directoryError:''});
 const errorText=(error:unknown,fallback:string)=>error instanceof Error?error.message:fallback;
 
 export function createSmellGeneration(input:Dependencies) {
@@ -55,9 +56,18 @@ export function createSmellGeneration(input:Dependencies) {
     if(directoryRead?.scope===scope)return directoryRead.job;
     if(!force&&loaded===scope)return Promise.resolve(view.value.refs);
     const read=input.repo.list(scope);
-    const job=read.then(refs=>{
-      if(view.value.scopeId===scope){loaded=scope;publish(scope,{refs});}
-      return refs;
+    const job=read.then(({refs,complete})=>{
+      if(directoryRead?.job!==job)return refs;
+      const known=complete?refs:[...new Map([...view.value.refs,...refs].map(ref=>[ref.recordId,ref])).values()];
+      loaded=complete?scope:null;
+      publish(scope,{refs:known,directoryError:complete?'':'部分公开消息暂未读到，重新打开「嗅」可重试。'});
+      return known;
+    }).catch(error=>{
+      if(directoryRead?.job===job){
+        loaded=null;
+        publish(scope,{directoryError:errorText(error,'公开消息目录暂时读不到。')});
+      }
+      throw error;
     }).finally(()=>{if(directoryRead?.job===job)directoryRead=undefined;});
     directoryRead={scope,job};
     return job;
@@ -68,7 +78,7 @@ export function createSmellGeneration(input:Dependencies) {
     select(scope);
     if(!scope||loaded===scope||running?.scope===scope)return;
     try{await readDirectory(scope);}
-    catch(error){publish(scope,{error:errorText(error,'公开消息目录暂时读不到。')});}
+    catch{/* The directory read has reported the failure in the view. */}
   }
 
   function changeSchedule(change:(schedule:SmellSchedule,scope:string)=>SmellSchedule){
@@ -100,7 +110,8 @@ export function createSmellGeneration(input:Dependencies) {
     publish(scope,{busy:true,error:'',message:'正在准备公开消息…'});
     let diagnostic:ReturnType<typeof beginDiagnostic>;
     try{
-      const refs=await readDirectory(scope,automatic);
+      const refs=await readDirectory(scope,automatic).catch(()=>null);
+      if(!refs){publish(scope,{message:''});return;}
       const armed=input.getSchedule(scope);
       const lastPublished=refs.reduce((max,ref)=>Math.max(max,ref.throughSeq),0);
       if(automatic&&(armed.enabledAfter===null||!input.repliesDue(scope,Math.max(armed.enabledAfter,lastPublished),through,armed.everyReplies))){
