@@ -4,12 +4,13 @@
 
 ## 安装内测版
 
-1. 安装并启用支持剧情楼层就绪通知的千千结，以及白鳥数据后端 0.2.0。[千千结](https://github.com/atonal519/ST-MyriadKnots) · [白鳥安装说明](https://github.com/atonal519/ST-BaiNiaoData#安装)
-   TauriTavern（2.2.0 及以上）不运行服务端插件，无需安装白鳥：百面相自动改用 TT 本地存储，与千千结的 TT 适配共用同一份白鳥数据。
+1. 安装并启用支持剧情楼层就绪通知的千千结。[千千结](https://github.com/atonal519/ST-MyriadKnots)
+   - 原版 SillyTavern 和 Luker 使用白鳥数据后端 0.2.0。原版白鳥装在服务端 `plugins/ST-BaiNiaoData`，在 `config.yaml` 设定 `enableServerPlugins: true` 后重启酒馆服务。安装流程已在原版 SillyTavern 1.19.0 验证。[白鳥安装说明](https://github.com/atonal519/ST-BaiNiaoData#安装)
+   - TauriTavern 2.2.0 及以上使用 TT 本地存储。请安装支持 TT 的千千结。
 2. 在酒馆的扩展页选择「安装扩展」，填入 `https://github.com/atonal519/ST-Polyphony`。
 3. 打开一个聊天，等千千结的资料就绪。从魔棒菜单打开百面相，在「设置 → 通用设置 → API 配置」选择主、副模型，再点「世界观 → 百相流转」。首次会先整理人物与世界基础。
 
-本次版本为 `0.1.0`。[内测公告](docs/updates-0.1.0.md)
+本次版本为 `0.1.1`。[内测公告](docs/updates-0.1.1.md)
 
 ## 当前界面与人物发展
 
