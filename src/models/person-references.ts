@@ -1,5 +1,5 @@
 import { extractJson } from '../simulation/json';
-import { constructionResponse, publicMessageOutput } from '../simulation/construction-response';
+import { constructionResponse, publicMessageOutput, readStructuredPrefix } from '../simulation/construction-response';
 
 type PersonMap = Map<string, string>;
 const personReferenceFields = new Set(['foundationPendingPersonIds','foundationPersonalityPendingPersonIds','qqjPersonId','fromPersonId','toPersonId','personId', 'person_id', 'person', 'personIds', 'participantIds', 'selectedPersonIds', 'people', 'continuingForPersonIds', 'interactionPersonIds', 'interaction_person_ids', 'onstagePersonIds', 'offstagePersonIds', 'previousOnstagePersonIds', 'cameraPersonIds', 'assertedPersonIds']);
@@ -164,10 +164,14 @@ export function decodeModelResponse(value: unknown, formalToCode: PersonMap, tas
   if (typeof value === 'string') {
     try { parsed = extractJson(value); }
     catch {
-      if (task !== 'history') return value;
-      const repaired = repairKnownParticipantQuotes(value, new Map([...formalToCode, ...codeToFormal]));
-      if (!repaired) return value;
-      try { parsed = extractJson(repaired); } catch { return value; }
+      try {
+        if (task === 'development' || task === 'atmosphere') parsed = readStructuredPrefix(value, 'flow').data;
+        else if (task === 'history') {
+          const repaired = repairKnownParticipantQuotes(value, new Map([...formalToCode, ...codeToFormal]));
+          if (!repaired) return value;
+          parsed = extractJson(repaired);
+        } else return value;
+      } catch { return value; }
     }
   }
   return mapTree(['world-construction','atmosphere'].includes(task)?constructionPersonKeys(parsed,codeToFormal):parsed, codeToFormal);

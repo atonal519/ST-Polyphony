@@ -42,8 +42,9 @@ const bainiao = createBainiaoClient();
 const repository = createWorldRepository(bainiao);
 const config = createConfigService();
 const enabledSettings = createPluginSettings();
+const buildRevision = new URL(import.meta.url).searchParams.get('rev');
 const dependencies = {
-  diagnostics:createDevelopmentDiagnostics({version}),
+  diagnostics:createDevelopmentDiagnostics({version:buildRevision?`${version}+${buildRevision}`:version}),
   directory: reader, repository, publicMessages: createPublicMessageRepository(bainiao), story: createStoryInputReader(), history: createStoryHistoryReader(), readiness:createQQJReadinessReader(), config,
   createModelRequester,
   materials: materialReader,

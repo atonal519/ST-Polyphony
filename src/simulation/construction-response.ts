@@ -5,30 +5,34 @@ const wrappers=['result','data','output','worldConstruction','baseline'];
 const object=(value:unknown):Record<string,any>|undefined=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:undefined;
 const unreadable=()=>new Error('世界基础结果的正式归属或完整记录无法确认，尚未保存，可重新世界构建。');
 const unreadableSmell=()=>new Error('模型已返回，但嗅没能读取这批稿件的格式。');
+const unreadableFlow=()=>new Error('模型返回内容无法解析为JSON。');
 interface Node {value:unknown;complete:boolean;fields?:Map<string,Node>;items?:Node[]}
 
 /** Keep the original structural path. Only closed array records survive an unfinished outer answer. */
-function readTree(source:string,invalid:()=>Error,repairBodyQuotes:boolean) {
+function readTree(source:string,invalid:()=>Error,repairField?:'body'|'description') {
  let cursor=0;
  const space=()=>{while(cursor<source.length&&/\s/.test(source[cursor]))cursor++;};
- const bodyEnd=/\s*(?:\}|,\s*(?:\}|"(?:[^"\\]|\\.)+"\s*:))/y;
- const quoted=(body=false):string|undefined=>{
+ const proseEnd=/\s*(?:\}|,\s*(?:\}|"(?:[^"\\]|\\.)+"\s*:))/y;
+ const nextField=/\s*"(?:[^"\\]|\\.)+"\s*:/y;
+ const quoted=(repairQuotes=false):string|undefined=>{
   let start=cursor++,escaped=false,repaired='';
   while(cursor<source.length){
    const char=source[cursor++];
    if(escaped){escaped=false;continue;}
    if(char==='\\'){escaped=true;continue;}
    if(char!=='"')continue;
-   // An inner dialogue mark does not end a body unless a JSON field boundary follows.
-   bodyEnd.lastIndex=cursor;
-   if(body&&!bodyEnd.test(source)){
+   // An inner dialogue mark does not end a prose field.
+   proseEnd.lastIndex=cursor;
+   if(repairQuotes&&!proseEnd.test(source)){
+    nextField.lastIndex=cursor;
+    if(repairField==='description'&&nextField.test(source))throw invalid();
     repaired+=source.slice(start,cursor-1)+'\\"';start=cursor;continue;
    }
    try{return JSON.parse(repaired+source.slice(start,cursor));}catch{throw invalid();}
   }
   return undefined;
  };
- const read=(body=false):Node=>{
+ const read=(repairQuotes=false):Node=>{
   space();const char=source[cursor];
   if(char==='{'||char==='['){
    cursor++;const fields=char==='{'?new Map<string,Node>():undefined,items=char==='['?[] as Node[]:undefined;
@@ -37,7 +41,7 @@ function readTree(source:string,invalid:()=>Error,repairBodyQuotes:boolean) {
    while(cursor<source.length){
     let key:string|undefined;
     if(fields){if(source[cursor]!=='"')return node;key=quoted();if(key===undefined)return node;if(fields.has(key))throw invalid();space();if(source[cursor++]!==':')return node;}
-    const child=read(repairBodyQuotes&&key==='body');if(fields){fields.set(key!,child);if(child.complete)Object.defineProperty(node.value,key!,{value:child.value,enumerable:true,configurable:true,writable:true});}else{items!.push(child);if(child.complete)(node.value as unknown[]).push(child.value);}
+    const child=read(repairField!==undefined&&key===repairField);if(fields){fields.set(key!,child);if(child.complete)Object.defineProperty(node.value,key!,{value:child.value,enumerable:true,configurable:true,writable:true});}else{items!.push(child);if(child.complete)(node.value as unknown[]).push(child.value);}
     if(!child.complete)return node;
     space();if(source[cursor]===close){cursor++;node.complete=true;return node;}
     if(source[cursor++]!==',')return node;
@@ -45,7 +49,7 @@ function readTree(source:string,invalid:()=>Error,repairBodyQuotes:boolean) {
    }
    return node;
   }
-  if(char==='"'){const value=quoted(body);return{value,complete:value!==undefined};}
+  if(char==='"'){const value=quoted(repairQuotes);return{value,complete:value!==undefined};}
   const start=cursor;while(cursor<source.length&&!/[\s,}\]]/.test(source[cursor]))cursor++;
   try{return{value:JSON.parse(source.slice(start,cursor)),complete:true};}catch{return{value:undefined,complete:false};}
  };
@@ -71,8 +75,9 @@ function select(value:unknown):Record<string,any> {
 }
 
 /** Read complete rows within one explicitly rooted response, including its final unfinished table. */
-export function readStructuredPrefix(value:string,kind:'construction'|'smell'='construction'):{data:unknown;complete:boolean} {
- const invalid=kind==='smell'?unreadableSmell:unreadable;
+export function readStructuredPrefix(value:string,kind:'construction'|'smell'|'flow'='construction'):{data:unknown;complete:boolean} {
+ const invalid=kind==='flow'?unreadableFlow:kind==='smell'?unreadableSmell:unreadable;
+ const repairField=kind==='flow'?'description':kind==='smell'?'body':undefined;
  let source=value.trim();
  const fenceStart=source.indexOf('```'),fenced=fenceStart>=0;
  if(fenced){
@@ -82,7 +87,8 @@ export function readStructuredPrefix(value:string,kind:'construction'|'smell'='c
   source=source.slice(fenceStart).replace(/^```(?:json)?\s*/i,'');
  }
  if(!source.startsWith('{')&&!(kind==='smell'&&source.startsWith('[')))throw invalid();
- const {root,end}=readTree(source,invalid,kind==='smell');
+ const {root,end}=readTree(source,invalid,repairField);
+ if(kind==='flow'&&!root.complete)throw invalid();
  let tail=source.slice(end).trim();
  if(fenced&&tail.startsWith('```'))tail=tail.slice(3).trim();
  // Never choose the first of several answers, or scan a nested example after a damaged root.

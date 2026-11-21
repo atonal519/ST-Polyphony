@@ -7,7 +7,7 @@ import {effectiveAtmospheres,type NpcWorldState} from '../domain/world-state';
 import {recordDiagnostic,diagnosticError,type DiagnosticTrace} from '../diagnostics/development';
 import {prepareDevelopment,type DevelopmentInput,type DevelopmentPreparation} from './development';
 import {selectCreativeFrame} from './creative-frame';
-import {developmentBoundary,type BoundaryRejection} from './stage-boundary';
+import {developmentBoundary,type BoundaryRejection,type SceneStage} from './stage-boundary';
 import {asObject,list,newId,responseObject,savedEndpoint,strings} from './trajectory';
 import {applyFoundation,foundationReferences,foundationSources,needsFoundationSupplement,FOUNDATION_CONTRACT} from './foundation';
 import {focusCircles,flowFoundation,flowPeople,focusAtmospheres,circleEmotionContext,shortText} from './flow-context';
@@ -16,6 +16,7 @@ import {encodePersonReferences} from '../models/person-references';
 import {socialContexts,resolveCircleReference,atmosphereCircleReference,atmosphereFitsCircle,circleLabel,circleTitle,setTasteCircleSettings} from '../domain/social-circles';
 import {hasPublicQuote,narrativeEvidence,privateProse} from './story-evidence';
 import {returnedIdentity} from './returned-identity';
+import {JSON_OUTPUT_RULES} from './json';
 
 export const ATMOSPHERE_INSTRUCTIONS=`你整理“味”：首要说清这群人现在是什么气氛、公开缘由、比以前怎样变化。逐一检查background.circles的有效群与明确两人关系，结合background.foundation、人物长期关切和旧background.atmospheres，承接各圈共同纽带、日常相处、成员差异及已有约束，再看最近偏移。薄群说明可在本次foundation沿旧id细化，不必重新构筑；不同圈各有侧重，同人保重叠，不因char连通合圈，直接关系不必造群。不要求每圈必产风向，也不强造圈数或人均结果；未变或未知省略沿用，不统一心情/知情。
 每段description直接展示给用户，用自然文字说该圈眼下的气氛、具体原因和有据变化，别只重抄关系身份或长期纽带。“公开”是认知约束，不是每段说明的显示标签；不写“公开缘由：”这类栏目头，不要求同一开头或收尾，不造未落定事项或关切。成分和数字只在内部使用，publicBasis仍作内部依据，不替代description。无新的模型说明时保留已接纳原文，不按分数改写成另一段故事。
@@ -30,7 +31,7 @@ background是持续作者参考，changes是本批完整变化依据。先看旧
 visual可选{temperature:"cold|neutral|warm",rhythm:"calm|flowing|agitated"}，只是展示分类，不评分，不因此造风向。${PROFILE_RELATION_INSTRUCTIONS}不输出思考或索要新请求。`;
 
 export interface ReferenceNormalization {key:string|null;part?:string;field:string;kind:'alias'|'discard-auxiliary';from:unknown;to?:string}
-export interface AtmosphereResult {state:NpcWorldState;changed:boolean;changedAtmospheres:number;boundaryRejections:BoundaryRejection[];rejections:Array<{key:string|null;part?:string;reason:string}>;referenceNormalizations:ReferenceNormalization[];foundationRejections:Array<{kind:string;key:string|null;reason:string}>}
+export interface AtmosphereResult {state:NpcWorldState;changed:boolean;changedAtmospheres:number;stages:SceneStage[];boundaryRejections:BoundaryRejection[];rejections:Array<{key:string|null;part?:string;reason:string}>;referenceNormalizations:ReferenceNormalization[];foundationRejections:Array<{kind:string;key:string|null;reason:string}>}
 type AtmosphereInput=DevelopmentInput&{prepared:DevelopmentPreparation;foundationRefs?:Map<string,string>};
 const equal=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 
@@ -118,7 +119,12 @@ export async function generateAtmosphere(input:DevelopmentInput&{prepared?:Devel
   const view=tasteSelection(input,prepared);
   const focused=prepared.focus&&new Set(prepared.focus.personIds);
   const supplement='本次主任务是当前公开情绪及变化。只更新确有变化的相关圈，其他沿用；用本批资料附带补已有基础的缺项，人工决定优先。';
-  const response=await input.dependencies.model.request({task:'atmosphere',instructions:supplement+'\n'+ATMOSPHERE_INSTRUCTIONS+'\n'+FOUNDATION_CONTRACT,input:{...atmosphereContext(input,prepared,view),presentationRequests:presentationRequests(input.people.filter(person=>!focused||focused.has(person.id)),input.state.developmentPresentation)},signal:input.signal,diagnostic:input.diagnostic});
+  const instructions=supplement+'\n'+ATMOSPHERE_INSTRUCTIONS+'\n'+FOUNDATION_CONTRACT+`
+${JSON_OUTPUT_RULES}
+顶层结构如下。没有可确认的变化时保留空数组，quietReason 写具体缘由。
+{"stages":[],"atmosphereUpdates":[],"circleNameUpdates":[],"foundation":{"people":[],"groups":[],"relations":[]},"presentationUpdates":[],"quietReason":""}
+返回前核对场段的 key、sourceSeqs、onstagePersonIds 和 offstagePersonIds。只引用输入给出的楼号和人物。每条风向的 circleRef 必须能对应输入圈子或本答声明的圈子，新增变化补齐场段、断言主体和公开依据。`;
+  const response=await input.dependencies.model.request({task:'atmosphere',instructions,input:{...atmosphereContext(input,prepared,view),presentationRequests:presentationRequests(input.people.filter(person=>!focused||focused.has(person.id)),input.state.developmentPresentation)},signal:input.signal,diagnostic:input.diagnostic});
   input.signal?.throwIfAborted();recordDiagnostic(input.diagnostic,'apply-started');
   try{const result=applyAtmosphere({...input,prepared},response,view);recordDiagnostic(input.diagnostic,'applied',{atmosphereCount:result.state.developmentAtmospheres?.length??0,changedAtmospheres:result.changedAtmospheres,backgroundChanged:result.changed,foundationRejections:result.foundationRejections.slice(0,24),atmosphereRejections:result.rejections.slice(0,24),boundaryRejectionCount:result.boundaryRejections.length,referenceNormalizationCount:result.referenceNormalizations.length});return result;}
   catch(error){recordDiagnostic(input.diagnostic,'apply-failed',diagnosticError(error));throw error;}
@@ -291,5 +297,5 @@ export function applyAtmosphere(input:AtmosphereInput,response:unknown,view=tast
   const renamed=renamedFoundation!==input.state.foundation;
   const state={...input.state,...(renamed?{foundation:renamedFoundation}:{}),developmentCreativeFrame:storedFrame,developmentAtmospheres:[...current.values()],developmentPresentation:applyPresentation(input.people,input.state.developmentPresentation,data.presentationUpdates)};
   const changedAtmospheres=[...new Set([...original.keys(),...current.keys()])].filter(id=>!equal(original.get(id),current.get(id))).length;
-  return {state,changedAtmospheres,changed:foundationChanged||renamed||!equal(state.developmentPresentation,input.state.developmentPresentation??[])||!equal(state.developmentAtmospheres,input.state.developmentAtmospheres??[])||!equal(storedFrame,input.state.developmentCreativeFrame),boundaryRejections:[...personBoundaryRejections,...boundary.rejected],rejections,referenceNormalizations,foundationRejections};
+  return {state,changedAtmospheres,changed:foundationChanged||renamed||!equal(state.developmentPresentation,input.state.developmentPresentation??[])||!equal(state.developmentAtmospheres,input.state.developmentAtmospheres??[])||!equal(storedFrame,input.state.developmentCreativeFrame),stages:boundary.stages,boundaryRejections:[...personBoundaryRejections,...boundary.rejected],rejections,referenceNormalizations,foundationRejections};
 }

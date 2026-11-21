@@ -34,6 +34,11 @@ test('independent taste uses secondary and hearing consumes the saved ACK and la
  const f=fixture();await f.app.refresh();await f.app.startDevelopment();
  assert.equal(f.sent.length,2);assert.equal(f.saved.length,2);assert.equal(f.saved[0].processedThroughSeq,1);assert.equal(f.saved[0].storyTime.text,'2027-03-20T08:00');assert.equal(f.saved[0].simulationRanges,undefined);
  const hearing=JSON.parse(f.sent[1].messages[1].content);assert.equal(hearing.atmospheres[0].description,'等候新货期间仍倾向按原计划办事。（ACK）');assert.deepEqual(sentProfiles(f.sent),[secondary,latestMain]);assert.equal(f.settingsReads,2);assert.equal(f.stored.processedThroughSeq,2);assert.equal(f.materialReads,1);assert.equal(f.referenceReads,0);
+ const [tastePrompt,hearingPrompt]=f.sent.map(request=>request.messages[0].content);
+ for(const prompt of [tastePrompt,hearingPrompt])assert.match(prompt,/最终答复只返回一个标准 JSON 对象/);
+ assert.match(tastePrompt,/"stages":\[\],"atmosphereUpdates":\[\],"circleNameUpdates":\[\]/);
+ assert.match(hearingPrompt,/旧条目用输入给出的 id，新条目用本答唯一的 key/);
+ assert.match(hearingPrompt,/events\.activityId 只填已给的旧事务 id、本答新事务的 key 或 null/);
  assert.equal(f.sent[0].max_completion_tokens,65536);assert.equal(Object.hasOwn(f.sent[0],'max_tokens'),false);
  assert.equal(f.sent[1].max_tokens,65536);assert.equal(Object.hasOwn(f.sent[1],'max_completion_tokens'),false);
  assert.equal(f.app.developmentView.value.modelCalls,2);assert.equal(f.app.developmentView.value.remainingCalls,0);

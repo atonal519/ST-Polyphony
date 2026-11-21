@@ -17,7 +17,7 @@ const flowStatus=computed(()=>{
     if(view?.status==='stopped')return paused(view.message||'已停止，请点击「百相流转」继续。');
   }
   const message=state.busy?(view?.saving?'正在保存世界更新。':view?.message||'正在读取本轮资料。')
-    :view?.status==='waiting'&&view.message?view.message
+    :(view?.status==='waiting'||view?.status==='saved')&&view.message?view.message
     :view?.started?'自动流转已启用，等待新的稳定剧情。'
     :state.world.foundation?'世界已构建，请点击「百相流转」启用自动更新。'
     :'自动流转尚未启用，请点击「百相流转」开始。';

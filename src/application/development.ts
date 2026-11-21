@@ -11,7 +11,7 @@ export interface DevelopmentView {status:'idle'|'running'|'saved'|'waiting'|'err
 type Snapshot={directory:PeopleDirectoryRead|null;state:NpcWorldState|null;revision:number|null};
 type Module='olfaction'|'hearing'|'construction';
 type Batch={people:PeopleDirectoryRead['people'];state:NpcWorldState;revision:number|null;story:StoryInput;initial:boolean;prepared:DevelopmentPreparation;module:Module;smellReady:boolean;constructionOnly:boolean;flowPrepared:boolean;diagnostic?:DiagnosticTrace};
-type Candidate={state:NpcWorldState;revision:number|null;module:Module;diagnostic?:DiagnosticTrace};
+type Candidate={state:NpcWorldState;revision:number|null;module:Module;diagnostic?:DiagnosticTrace;noNewWork?:boolean};
 
 export function createDevelopmentController(input:{deps:ControllerDependencies;state:ShallowRef<ControllerState>;refresh():Promise<void>;snapshot():Snapshot;publish(state:NpcWorldState,revision:number,people:PeopleDirectoryRead['people']):PeopleDirectoryRead['people']}) {
   const view=shallowRef<DevelopmentView>({status:'idle',started:false,pendingReplies:0,everyReplies:1,processedThroughSeq:null,modelCalls:0,totalCalls:2,remainingCalls:2,requestPending:false,saving:false,canSave:false,needsReload:false,message:'',error:''});
@@ -58,7 +58,7 @@ export function createDevelopmentController(input:{deps:ControllerDependencies;s
         currentBatch.state=saved.state;currentBatch.revision=saved.revision;currentBatch.people=people;currentBatch.prepared={...rebaseDevelopmentPreparation({...currentBatch},currentBatch.prepared),worldSettings:undefined};currentBatch.module='hearing';currentBatch.smellReady=true;
         view.value={...view.value,status:stopping?'stopped':'running',saving:false,needsReload:false,error:'',message:stopping?'背景已保存，人物事务尚未更新；点百相流转继续剩余部分。':'背景已保存，正在更新人物事务。'};
       } else {
-        batch=null;counts(0);view.value={...view.value,status:stopping?'stopped':'saved',saving:false,needsReload:false,error:'',message:stopping?'本次已保存，后续自动更新已暂停。':'本轮更新已保存。'};
+        batch=null;counts(0);view.value={...view.value,status:stopping?'stopped':'saved',saving:false,needsReload:false,error:'',message:stopping?'本次已保存，后续自动更新已暂停。':current.noNewWork?'本轮没有可保存的事务或经历，等待新的稳定剧情。':'本轮更新已保存。'};
       }
       inspect();return true;
     } catch(error) {
@@ -82,14 +82,19 @@ export function createDevelopmentController(input:{deps:ControllerDependencies;s
       view.value={...view.value,message:'正在形成局部风向。'};
       const result=await generateAtmosphere({people:current.people,state:current.state,story:current.story,initial:current.initial,prepared:current.prepared,signal,diagnostic,dependencies:{materials:input.deps.materials,worldSettings:input.deps.worldSettings,model:requester(diagnostic)}});
       signal.throwIfAborted();
+      current.prepared={...current.prepared,referenceStages:result.stages};
       if(result.changed){candidate={state:result.state,revision:current.revision,module:'olfaction',diagnostic};if(!await persist())return false;}
-      else{current.prepared={...current.prepared,worldSettings:undefined};current.module='hearing';current.smellReady=true;recordDiagnostic(diagnostic,'unchanged',{module:'olfaction',atmosphereCount:current.state.developmentAtmospheres?.length??0});}
+      else{
+        if(result.stages.length)current.prepared=rebaseDevelopmentPreparation(current,current.prepared);
+        current.prepared={...current.prepared,worldSettings:undefined};current.module='hearing';current.smellReady=true;
+        recordDiagnostic(diagnostic,'unchanged',{module:'olfaction',atmosphereCount:current.state.developmentAtmospheres?.length??0});
+      }
     }
     if(stopping||!settings.isEnabled()){view.value={...view.value,status:'stopped',message:'背景已保存或沿用，人物事务尚未更新；点百相流转继续剩余部分。'};return false;}
     signal.throwIfAborted();const diagnostic=moduleTrace(current,'hearing');activeDiagnostic=diagnostic;
     view.value={...view.value,status:'running',message:'正在更新人物事务与经历。'};
     const result=await generateDevelopment({people:current.people,state:current.state,story:current.story,initial:current.initial,prepared:current.prepared,signal,diagnostic,dependencies:{materials:input.deps.materials,worldSettings:input.deps.worldSettings,model:requester(diagnostic)}});
-    signal.throwIfAborted();candidate={state:result.state,revision:current.revision,module:'hearing',diagnostic};return persist();
+    signal.throwIfAborted();candidate={state:result.state,revision:current.revision,module:'hearing',diagnostic,noNewWork:result.noNewWork};return persist();
   }
   function failed(error:unknown,signal:AbortSignal,diagnostic?:DiagnosticTrace){
     recordDiagnostic(diagnostic,signal.aborted?'stopped':'failed',diagnosticError(error));counts(remaining());

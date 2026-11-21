@@ -10,10 +10,10 @@ import type { NpcWorldState } from '../domain/world-state';
 import {discardInvalidAtmospheres} from '../domain/world-state';
 import {selectCreativeFrame,type CreativeFrame} from './creative-frame';
 import {developmentGate} from './life-rhythm';
-import { activityChange, applyCalibration, eligibleCalibration, modelReferenceContract, type Calibration, type CalibrationRejection } from './calibration';
+import { activityChange, applyCalibration, eligibleCalibration, InvalidCalibrationCorrection, modelReferenceContract, type Calibration, type CalibrationRejection } from './calibration';
 import { asObject, list, newId, responseObject, savedEndpoint, savedStoryClock, boundaryClock, strings } from './trajectory';
 import { factEvidenceKind, historyFactSeqs } from './fact-sources';
-import { developmentBoundary, type BoundaryRejection } from './stage-boundary';
+import { developmentBoundary, type BoundaryRejection, type SceneStage } from './stage-boundary';
 import {recordDiagnostic,diagnosticError,type DiagnosticTrace} from '../diagnostics/development';
 import {selectWorldMemory,selectFlowMemory,type SuppliedMemory} from './world-memory';
 import {applyFoundation,FOUNDATION_CONTRACT,needsFoundationSupplement} from './foundation';
@@ -22,15 +22,16 @@ import {selectFlowFocus,type FlowFocus} from './flow-focus';
 import {focusCircles,focusAtmospheres,flowFoundation,flowPeople,circleEmotionContext,shortText} from './flow-context';
 import {returnedIdentity} from './returned-identity';
 import {drawAngles} from '../vendor/gouhua-vectors/draw';
+import {JSON_OUTPUT_RULES} from './json';
 
-export const DEVELOPMENT_INSTRUCTIONS = `你负责共同创作“听”的参考性场外NPC日常。按narrativeRoles.autonomous与本批stages的镜头交接，优先想一件本人在镜头外会主动发起、有来由的新目标、新机遇或关系动作。用他的职责、兴趣、承诺、日程和已有结果发散，用具体细节写清他怎么选、做了什么、有什么结果。可以独自试一个办法、做一件小企划、遇见新的人，或利用资源和环境的变化。有自然交集时可以几人同行。旧事在等或在办的人也有自己的另一段生活。
+export const DEVELOPMENT_INSTRUCTIONS = `你负责共同创作“听”的参考性场外NPC日常。narrativeRoles按本批末尾已识别的镜头归属提供候选。从narrativeRoles.autonomous优先挑选能在镜头外行动的人。storyControlled里的在场人物按正文同步，回顾他们已有明确离场的时段时用对应的场段。若没有可写的场外变化，给出quietReason。优先想一件本人在镜头外会主动发起、有来由的新目标、新机遇或关系动作。用他的职责、兴趣、承诺、日程和已有结果发散，用具体细节写清他怎么选、做了什么、有什么结果。可以独自试一个办法、做一件小企划、遇见新的人，或利用资源和环境的变化。有自然交集时可以几人同行。旧事在等或在办的人也有自己的另一段生活。
 creativeAngles里的短语只是给相应人物的创作素材。可择用、组合或跳过，没抽到的人也照场景取材。角度不提供已发生的事实、参与资格或知情。candidates.storyMentions供定位正文，openMatterIds是碰到同一事项的取材线索；提名不表示在场、关系成立或已经行动。沿用已有作息，休息、等候和零新增都可以。人物目录供引用，正文校准照实同步。
 有可读进展的独立新事可写activities和关联events，有意思的可走几步或留可延续的下一步，纯过场只写event。completed表示整条事项已经收束，当窗结清的独立短事也可用。只完成一个步骤时，经过和结果写进event.description，沿原活动ID继续推进或等下一步，保持active/waiting。按目的和对象分辨新旧，修邻居的门与自家窗帘是独立的事。同一笔房租、同一件事换工位或换视角仍沿已有ID。核对最新进展，有新的可行动条件、实际决定或自然变化才返回旧事项续进或结清。只提到某人、同义换词、再查看、例行等待时保留旧现状。不因换参与者、称呼或等待视角另建，参与者进出不自动结束事项。共同经历只记一次，保实际参与人。只发展已过去的时段，未来约定只写事项计划，无可信耗时不猜日期或提前办完。重大冲突和关键世界变化依正文，不从小事或创作角度硬推。
 已完成的旧事项只供理解来龙去脉，不在自主推进里续写或改回未完成。正文明确补充旧事时用calibration同步，之后出现的新目标可以另起新线。
 承接已接纳atmospheres与circleEmotions，不另评风向。按emotionGuidance承接当前强弱，已缓和的情绪不按旧措辞升级。风向、人物长档和QQJ材料不授予人物知情；各人只按实际获知及途径行动，retained-report只是收到过的旧说法。正文中的草稿、注释、图片包装不是已发生事实。
 stages有序，每项{key,sourceSeqs,onstagePersonIds,offstagePersonIds}，可同楼分段。从previousOnstagePersonIds承接，正文明确离场或镜头交接才解除，重入场交回正文；未提及或他人入场不解除原在场者。cameraPersonIds不能解除；user始终不自主。只从sourceContract.storySeqs引用楼号，calibrationEligible=false仅供时间参考，不能据此变更镜头归属或正文事实。在场者和user的未给行动、回应、缺席、去向保持未决，不编转述或目击替其定案。
-只返回JSON增量。activities、events、knowledge、continuingEffects各项必有stageKey、assertedPersonIds和assertsUser（布尔），断言涵盖直接与间接受影响的人。activities用id或新key、description、status、participantIds，状态planned/active/waiting/completed，description写终点情况、结果和具体下一步。活动行结构示例，s1须是本答有效场段，人员和内容按本轮填写。
-{"key":"life1","description":"装好第一块挡雨板，稍后再调松紧。","status":"active","participantIds":["P1"],"stageKey":"s1","assertedPersonIds":["P1"],"assertsUser":false}
+有referenceStages时，按同一批正文的场段逐字引用既有key，可省略stages。若需调整场段或补入新场段，返回所有用到的完整stages并按全文的出入场顺序排列。
+只返回JSON增量。描述内的引语用中文引号。activities、events、knowledge、continuingEffects各项必有stageKey、assertedPersonIds和assertsUser（布尔），断言涵盖直接与间接受影响的人。每个stageKey引用本轮实际场段。activities用id或新key、description、status、participantIds，状态planned/active/waiting/completed，description写终点情况、结果和具体下一步。
 events用key、description、participantIds和可空activityId，依发生顺序；事项与经历直接写正文，不返回title，经历可以多段。event.storyTime仅写已经发生且有据的时间，不超过currentClock，eventLinks的continues与caused-by区别开，event.activityChange只记当时的实际变化，不能塞回终点概况。knowledge用personId/eventId/reason，continuingEffects用eventId/personIds。人物只用输入P代号或已声明新人物key；旧活动、经历用实际给过的ID，新记录只用本答有效key。storyTime用text/sourceSeqs/elapsed，保原精度。新作息仅有依据时回routines:{personId,activeHours,tentative,basis}数组，activeHours为0–24时段，可跨夜；arrangements:{personId,kind:"active|rest",from,to,sourceSeqs}数组只同步正式正文明确的临时安排。无变化可省，平静给具体quietReason。
 calibration只同步正文事实，四组按需返回：facts新项{key,description,participantIds,sourceSeqs,storyTime可选,activityId可选}，既有只用sourceContract.factIds中的id；activityUpdates:{id或新key,change:{description,status,participantIds},sourceSeqs}。正文明确推进或结清原事项时，facts写一次已发生结果，只通过facts的activityId标明所属事项，填本次activities已给的旧ID或本答确实成立的事项key。只连处理同一件事的事实。同人、同楼只是候选；一楼可以有多条事实。例：「甲交货，乙邀甲入队」拆两条：交货挂原交货ID，邀入队另写一条并省略activityId。facts的participantIds只列该条事实的直接当事人；同一事项若有新增直接当事人，在同源activityUpdates的change.participantIds明确纳入。activityUpdates的change.description只写该事项的现况。未兑现的计划只写事项，不写facts或events，也不自动知情。包括在场者和user已确定的事，只涉未登记user时显式participantIds:[]。新事实引用sourceContract.calibrationSeqs的正式楼号；已有事项还可引用已给正文事实的原楼号。eventCorrections:{eventId,byEventId,reason}只修已被推翻的旧事，byEventId取已给正文事实id或本答facts.key；旧事的每位已有知情者需给knowledgeCorrections:{personId,eventId,byEventId,treatment:"invalidated|retained-report",reason}，保实际收到过的说法，不替人物获取新事实。人工与合格正文不可覆盖，创作进展不用calibration。不要重述输入或索要新请求。`;
 
@@ -38,9 +39,14 @@ export interface DevelopmentInput { people: SourcePerson[]; state: NpcWorldState
 /** A rebuilt current baseline may refer to older stable prose without moving the existing world back. */
 export const processedCurrentReference=(input:DevelopmentInput)=>input.initial&&input.state.processedThroughSeq!==null&&(input.story.throughSeq===null||input.story.throughSeq<=input.state.processedThroughSeq);
 export const developmentClock=(input:DevelopmentInput)=>processedCurrentReference(input)?input.state.storyTime?.text??null:readStoryClock(input.story.turns);
-export interface DevelopmentResult { state: NpcWorldState; window: SimulationWindow; addedEvents: number; addedKnowledge: number; changedActivities: number; boundaryRejections: BoundaryRejection[]; calibrationRejections:CalibrationRejection[]; acceptedWork:number; submittedWork:number }
-export interface DevelopmentPreparation {materials:Awaited<ReturnType<typeof collectLifeMaterials>>['materials'];materialPersonIds?:string[];worldSettings?:WorldSettings;currentClock:string|null;creativeFrame:CreativeFrame;narrativeRoles:{storyControlled:Array<{personId:string;name:string}>;autonomous:Array<{personId:string;name:string}>;policy:string};restHint:ReturnType<typeof developmentGate>;focus?:FlowFocus}
+export interface DevelopmentResult { state: NpcWorldState; window: SimulationWindow; addedEvents: number; addedKnowledge: number; changedActivities: number; boundaryRejections: BoundaryRejection[]; calibrationRejections:CalibrationRejection[]; acceptedWork:number; submittedWork:number; noNewWork:boolean }
+export interface DevelopmentPreparation {materials:Awaited<ReturnType<typeof collectLifeMaterials>>['materials'];materialPersonIds?:string[];worldSettings?:WorldSettings;currentClock:string|null;creativeFrame:CreativeFrame;narrativeRoles:{storyControlled:Array<{personId:string;name:string}>;autonomous:Array<{personId:string;name:string}>;policy:string};restHint:ReturnType<typeof developmentGate>;focus?:FlowFocus;referenceStages?:SceneStage[]}
 export function rebaseDevelopmentPreparation(input:DevelopmentInput,prepared:DevelopmentPreparation):DevelopmentPreparation {
+ if(prepared.referenceStages?.length){
+  const {onstagePersonIds}=developmentBoundary(input,{stages:prepared.referenceStages});
+  // Only the request's candidate selection uses this projection. The durable boundary still uses the original story and stages.
+  input={...input,state:{...input.state,developmentOnstagePersonIds:onstagePersonIds}};
+ }
  if(!prepared.focus)return withDevelopmentRoles(input,prepared);
  const savedTaste=input.state.simulationRanges?.at(-1);
  const floors=new Set(input.story.turns.filter(turn=>turn.calibrationEligible!==false&&turn.seq>(input.state.processedThroughSeq??0)).map(turn=>'history-floor:'+turn.seq));
@@ -111,9 +117,10 @@ export function developmentContext(input:DevelopmentInput,prepared:DevelopmentPr
   }):memory.activities;
   const events=memory.events.map(event=>({...event,...(focus?{description:shortText(recordBody(event),650),eventLinks:event.eventLinks?.filter(ref=>selectedIds.has(ref.eventId)),activityChange:undefined}:{}),evidenceKind:factEvidenceKind(event,input.state.scopeId)}));
   const references=modelReferenceContract(memory,input.story.turns);
+  const storyControlled=new Set(prepared.narrativeRoles?.storyControlled.map(row=>row.personId));
   const creativeAngles=options.construction||input.story.throughSeq===null?[]:drawAngles(
     JSON.stringify([input.state.scopeId,input.story.throughSeq]),
-    (focus?.everyday??selectFlowFocus(input.people,input.state,input.story.turns,prepared.currentClock,input.cameraPersonIds).everyday).map(row=>row.personId),
+    (focus?.everyday??selectFlowFocus(input.people,input.state,input.story.turns,prepared.currentClock,input.cameraPersonIds).everyday).map(row=>row.personId).filter(id=>!storyControlled.has(id)),
   );
   recordDiagnostic(input.diagnostic,'memory-selected',{selectedEvents:memory.events.length,totalEvents:input.state.events.length,selectedKnowledge:memory.knowledge.length,selectedActivities:memory.activities.length});
   return {
@@ -124,6 +131,7 @@ export function developmentContext(input:DevelopmentInput,prepared:DevelopmentPr
     routines:(input.state.developmentRoutines??[]).filter(row=>!focusIds||focusIds.has(row.personId)),arrangements:(input.state.developmentArrangements??[]).filter(row=>!focusIds||focusIds.has(row.personId)),
     referencePolicy:'QQJ非空人工决定与正文事实优先；有用当前字段继续参考，空或不适用的普通自动字段由同次模型对照许可卡书及已存基础选择补充，不回灌旧QQJ简介。人物资料不是历史快照或当前行动/知情证据。',
     previousOnstagePersonIds: input.state.developmentOnstagePersonIds ?? [], cameraPersonIds: input.cameraPersonIds ?? [],
+    ...(prepared.referenceStages?.length?{referenceStages:prepared.referenceStages}:{}),
     activities,events,knowledge:memory.knowledge,
     circleEmotions,
     ...(options.construction?{creativeFrame:prepared.creativeFrame}:creativeAngles.length?{creativeAngles}:{}),
@@ -137,21 +145,60 @@ export async function generateDevelopment(input: DevelopmentInput & { dependenci
   input.signal?.throwIfAborted();
   const prepared=input.prepared??await prepareDevelopment(input);
   const view=hearingSelection(input,prepared);
-  const response = await input.dependencies.model.request({ task: 'development', instructions: DEVELOPMENT_INSTRUCTIONS+'\n'+FOUNDATION_CONTRACT+'\n同答foundation.groups/relations可引用已接纳event key。从实际行动结果判断成员与关系变化，不为造圈另创行动。eventLinks须是有据延续或因果，不由同人、时间相邻推原因。', signal: input.signal, onStarted: input.onStarted, input:developmentContext(input,prepared,{view}) });
+  const instructions=DEVELOPMENT_INSTRUCTIONS+'\n'+FOUNDATION_CONTRACT+`
+同答foundation.groups/relations可引用已接纳event key。从实际行动结果判断成员与关系变化，不为造圈另创行动。eventLinks须是有据延续或因果，不由同人、时间相邻推原因。
+${JSON_OUTPUT_RULES}
+顶层结构如下。无条目的数组用 []。已有场段可直接引用，此时 stages 用 []。确实没有可写的场外变化时给出具体的 quietReason。
+{"stages":[],"activities":[],"events":[],"knowledge":[],"continuingEffects":[],"foundation":{"people":[],"groups":[],"relations":[]},"calibration":{"facts":[],"activityUpdates":[],"eventCorrections":[],"knowledgeCorrections":[]},"quietReason":""}
+返回前核对每条事务与经历。旧条目用输入给出的 id，新条目用本答唯一的 key。events.activityId 只填已给的旧事务 id、本答新事务的 key 或 null。每条新行动及其知情、后续影响都给有效的 stageKey、assertedPersonIds 和布尔 assertsUser。只保留可确认的人物与引用。`;
+  const response = await input.dependencies.model.request({ task: 'development', instructions, signal: input.signal, onStarted: input.onStarted, input:developmentContext(input,prepared,{view}) });
   input.signal?.throwIfAborted();
   recordDiagnostic(input.diagnostic,'apply-started');
-  try{const result=applyDevelopment(input,response,{memory:view.memory,sources:prepared.focus?view.foundation.sources:undefined});recordDiagnostic(input.diagnostic,'applied',()=>({addedEvents:result.addedEvents,addedKnowledge:result.addedKnowledge,changedActivities:result.changedActivities,acceptedWork:result.acceptedWork,submittedWork:result.submittedWork,calibrationRejections:result.calibrationRejections.slice(0,24),boundaryRejections:result.boundaryRejections.slice(0,24),boundaryRejectionCount:result.boundaryRejections.length}));return result;}
+  try{const result=applyDevelopment(input,response,{memory:view.memory,sources:prepared.focus?view.foundation.sources:undefined,referenceStages:prepared.referenceStages});recordDiagnostic(input.diagnostic,'applied',()=>({addedEvents:result.addedEvents,addedKnowledge:result.addedKnowledge,changedActivities:result.changedActivities,acceptedWork:result.acceptedWork,submittedWork:result.submittedWork,calibrationRejections:result.calibrationRejections.slice(0,24),boundaryRejections:result.boundaryRejections.slice(0,24),boundaryRejectionCount:result.boundaryRejections.length}));return result;}
   catch(error){recordDiagnostic(input.diagnostic,'apply-failed',diagnosticError(error));throw error;}
 }
 
-export function applyDevelopment(input: DevelopmentInput, response: unknown, selection?:{memory:SuppliedMemory;sources?:Map<string,SourceRef>}): DevelopmentResult {
+function reuseReferenceStages(input: DevelopmentInput, data: Record<string, any>, stages?: SceneStage[]) {
+  if (!stages?.length || data.stages != null && !(Array.isArray(data.stages) && !data.stages.length)) return data;
+  const [stage] = stages;
+  if (stages.length === 1 && !stage.offstagePersonIds.length) {
+    const official = input.story.turns.filter(turn => !turn.isUser && turn.calibrationEligible !== false);
+    const foundation = asObject(data.foundation);
+    const rows = [data.activities, data.events ?? data.results, data.knowledge, data.continuingEffects, foundation?.people, foundation?.groups, foundation?.relations];
+    const keys = new Set(rows.flatMap(list).map(row => row.stageKey).filter(key => typeof key === 'string' && key.trim()));
+    // An undeclared key can refer to the sole stage only if it spans this whole batch and releases nobody.
+    if (keys.size === 1 && !keys.has(stage.key) && official.length && official.every(turn => stage.sourceSeqs.includes(turn.seq))) {
+      const [key] = keys;
+      return { ...data, stages: [{ ...stage, key }] };
+    }
+  }
+  return { ...data, stages };
+}
+
+function normalizeLocalActivityIds(activities:Record<string,any>[],events:Record<string,any>[],savedIds:Set<string>,calibration:unknown) {
+  const linked=new Set(events.map(row=>row.activityId??row.activityRef??row.activityKey));
+  const claims=new Map<string,number>();
+  for(const row of [...activities,...list(calibration)]) {
+    for(const ref of new Set([row.id,row.key]))if(typeof ref==='string')claims.set(ref.trim(),(claims.get(ref.trim())??0)+1);
+  }
+  return activities.map(row=>{
+    const {id,...rest}=row;
+    if(typeof id!=='string'||!id||Object.hasOwn(row,'key')||savedIds.has(id.trim())||claims.get(id.trim())!==1||!linked.has(id))return row;
+    // A persisted ID can identify unavailable or deleted work. Only a linked, unique local declaration is repairable.
+    if(/^bmx-\d+-|^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(id.trim()))return row;
+    return {...rest,key:id};
+  });
+}
+
+export function applyDevelopment(input: DevelopmentInput, response: unknown, selection?:{memory:SuppliedMemory;sources?:Map<string,SourceRef>;referenceStages?:SceneStage[]}): DevelopmentResult {
   const suppliedMemory=selection?.memory??selectWorldMemory(input.people,input.state),initialFoundation=input.state.foundation;
   const suppliedEvents=new Set(suppliedMemory.events.map(event=>event.id));
   const existingEventIds=new Set(input.state.events.map(event=>event.id));
   const suppliedActivities=selection?.sources&&new Set(suppliedMemory.activities.map(activity=>activity.id));
   const availableEvent=(id:string)=>!selection?.sources||suppliedEvents.has(id)||!existingEventIds.has(id);
   const outer = responseObject(response); let data = asObject(outer.development) ?? outer;
-  if (!['foundation','activities','events','results','knowledge','calibration','routines','arrangements','quietReason'].some(key => Object.hasOwn(data, key))) throw new Error('人物发展结果无法读取，请重新更新。');
+  if (!['foundation','activities','events','results','knowledge','continuingEffects','calibration','routines','arrangements','quietReason'].some(key => Object.hasOwn(data, key))) throw new Error('人物发展结果无法读取，请重新更新。');
+  data = reuseReferenceStages(input, data, selection?.referenceStages);
   let ids = new Set(input.people.map(person => person.id));
   let boundary = developmentBoundary(input, data);
   const seqs = new Set(input.story.turns.filter(turn=>turn.calibrationEligible!==false).map(turn => turn.seq));
@@ -202,16 +249,27 @@ export function applyDevelopment(input: DevelopmentInput, response: unknown, sel
     boundary=developmentBoundary(input,data,built.refs);
   }
   const rawCalibration=asObject(data.calibration),knownActivityIds=new Set(input.state.activities.map(row=>row.id));
+  const creativeEvents=list(data.events??data.results),rawFacts=list(rawCalibration?.facts);
+  const eventKeys=new Set<string>(),ambiguousEventKeys=new Set<string>();
+  const eventKey=(row:Record<string,any>)=>typeof row.key==='string'?row.key.trim():'';
+  for(const row of [...creativeEvents,...rawFacts]){
+    const key=eventKey(row);if(!key)continue;
+    if(eventKeys.has(key))ambiguousEventKeys.add(key);
+    eventKeys.add(key);
+  }
+  if(ambiguousEventKeys.size)recordDiagnostic(input.diagnostic,'event-keys-rejected',{reason:'duplicate-event-key',submittedWork:ambiguousEventKeys.size});
+  const creativeActivities=normalizeLocalActivityIds(list(data.activities),creativeEvents,knownActivityIds,rawCalibration?.activityUpdates);
+  const resultTables=[data.activities,data.events??data.results,data.knowledge,data.continuingEffects];
   // Normalize the complete correction dependency set before facts and their consumers are applied.
   const calibration=rawCalibration?eligibleCalibration({
-    facts:list(rawCalibration.facts).filter(row=>!row.id||availableEvent(row.id)),
+    facts:rawFacts.filter(row=>!ambiguousEventKeys.has(eventKey(row))&&(!row.id||availableEvent(row.id))),
     eventCorrections:list(rawCalibration.eventCorrections).filter(row=>availableEvent(row.eventId)&&availableEvent(row.byEventId)),
     activityUpdates:list(rawCalibration.activityUpdates).map(row=>returnedIdentity(row,knownActivityIds)??row).filter(row=>!row.id||!suppliedActivities||suppliedActivities.has(row.id)),
     knowledgeCorrections:list(rawCalibration.knowledgeCorrections).filter(row=>availableEvent(row.eventId)&&availableEvent(row.byEventId)),
   } as Calibration,input.story.turns,input.state.knowledge):null;
   let acceptedWork=foundationAccepted;
   const calibrationRejections:CalibrationRejection[]=[];
-  let submittedWork=foundationSubmitted+['activities','knowledge','continuingEffects'].reduce((sum,key)=>sum+list(data[key]).length,0)+list(data.events??data.results).length+['facts','eventCorrections','activityUpdates','knowledgeCorrections'].reduce((sum,key)=>sum+list(rawCalibration?.[key]).length,0);
+  let submittedWork=foundationSubmitted+resultTables.reduce((sum,value)=>sum+list(value).length,0)+['facts','eventCorrections','activityUpdates','knowledgeCorrections'].reduce((sum,key)=>sum+list(rawCalibration?.[key]).length,0);
   const activityRefs = new Map<string,string>(); const eventRefs = new Map<string,string>();
   // Establish only sourced factual identities before creative rows refer to them; final calibration still wins.
   const candidates = list(calibration?.activityUpdates).filter(item => !Object.hasOwn(item,'id'));
@@ -240,7 +298,6 @@ export function applyDevelopment(input: DevelopmentInput, response: unknown, sel
   const bindEvent=(key:unknown,id:string)=>{
     if(typeof key!=='string'||!key.trim())return;
     const ref=key.trim();
-    if(eventRefs.has(ref)&&eventRefs.get(ref)!==id)throw new Error('返回的临时引用重复，结果未保存，请重新更新。');
     eventRefs.set(ref,id);
   };
   const activities = new Map(authority.activities.map(activity=>[activity.id,activity]));
@@ -250,7 +307,7 @@ export function applyDevelopment(input: DevelopmentInput, response: unknown, sel
   const deferred = new Map<string,{row:Record<string,any>;participants:string[]}>();
   const eventStages = new Map<string,number>();
   const intermediateChanges = new Set<string>();
-  for (const item of boundary.ordered(data.activities)) {
+  for (const item of boundary.ordered(creativeActivities)) {
     const row=returnedIdentity(item,activities);if(!row)continue;
     const reference = typeof row.id === 'string' ? row.id.trim() : '';
     const key = typeof row.key === 'string' ? row.key.trim() : '';
@@ -281,7 +338,8 @@ export function applyDevelopment(input: DevelopmentInput, response: unknown, sel
     }
   }
   let events: WorldEvent[] = [...authority.events]; let addedEvents=0;const newEventRows=new Map<string,Record<string,any>>(),knownEventIds=new Set(events.map(event=>event.id));
-  for (const item of boundary.ordered(data.events ?? data.results)) {
+  for (const item of boundary.ordered(creativeEvents)) {
+    if(ambiguousEventKeys.has(eventKey(item)))continue;
     const row=returnedIdentity(item,knownEventIds);if(!row)continue;
     if (typeof row.id==='string' && row.id.trim()) { if (availableEvent(row.id.trim())&&events.some(event=>event.id===row.id.trim())) {bindEvent(row.key,row.id.trim());submittedWork--;} continue; }
     const reference=row.activityId ?? row.activityRef ?? row.activityKey ?? null;
@@ -317,7 +375,7 @@ export function applyDevelopment(input: DevelopmentInput, response: unknown, sel
   }
   const factActivityRefs=new Map<string,string>();
   // Accept each sourced fact once before its same-answer dependent references; corrections still apply last.
-  if(calibration&&list(calibration.facts).length)events=applyCalibration({state:{...authority,activities:[...activities.values()],events},calibration:{facts:list(calibration.facts),activityUpdates:[],eventCorrections:[],knowledgeCorrections:[]} as Calibration,people:input.people,turns:input.story.turns,refs:eventRefs,authorFacts:suppliedMemory.events,factTime,onFactAccepted:(item,id)=>{if(typeof item.activityId==='string'&&item.activityId.trim())factActivityRefs.set(id,item.activityId.trim());},onAccepted:()=>{acceptedWork++;},onReference:()=>{submittedWork--;}}).events;
+  if(calibration&&list(calibration.facts).length)events=applyCalibration({state:{...authority,activities:[...activities.values()],events},calibration:{facts:list(calibration.facts),activityUpdates:[],eventCorrections:[],knowledgeCorrections:[]} as Calibration,people:input.people,turns:input.story.turns,refs:eventRefs,authorFacts:suppliedMemory.events,factTime,rejections:calibrationRejections,onFactAccepted:(item,id)=>{if(typeof item.activityId==='string'&&item.activityId.trim())factActivityRefs.set(id,item.activityId.trim());},onAccepted:()=>{acceptedWork++;},onReference:()=>{submittedWork--;}}).events;
   const originalEvents=new Set(input.state.events.map(event=>event.id)),acceptedEvents=new Set([...suppliedEvents,...events.filter(event=>!originalEvents.has(event.id)).map(event=>event.id)]);
   for(const event of events)if(newEventRows.has(event.id)){const row=newEventRows.get(event.id)!;const links=list(row.eventLinks).flatMap(link=>{const id=eventRefs.get(link.eventId)??link.eventId;return typeof id==='string'&&id!==event.id&&acceptedEvents.has(id)&&['continues','caused-by'].includes(link.kind)?[{eventId:id,kind:link.kind as 'continues'|'caused-by'}]:[];});if(links.length)event.eventLinks=links;}
   for (const effect of boundary.ordered(data.continuingEffects)) {
@@ -346,7 +404,17 @@ export function applyDevelopment(input: DevelopmentInput, response: unknown, sel
     updates.push({participantIds,sourceSeqs});
     confirmedParticipants.set(id,updates);
   };
-  let calibrated=calibration?applyCalibration({state:creative,calibration:{...calibration,facts:[],activityUpdates},people:input.people,turns:input.story.turns,refs:eventRefs,authorFacts:suppliedMemory.events,activityRefs,rejections:calibrationRejections,onActivityParticipants:recordActivityParticipants,onAccepted:()=>{acceptedWork++;},onReference:()=>{submittedWork--;}}):creative;
+  let calibrated=activityUpdates.length?applyCalibration({state:creative,calibration:{facts:[],eventCorrections:[],knowledgeCorrections:[],activityUpdates},people:input.people,turns:input.story.turns,refs:eventRefs,authorFacts:suppliedMemory.events,activityRefs,rejections:calibrationRejections,onActivityParticipants:recordActivityParticipants,onAccepted:()=>{acceptedWork++;},onReference:()=>{submittedWork--;}}):creative;
+  if(calibration&&(list(calibration.eventCorrections).length||list(calibration.knowledgeCorrections).length)){
+    let correctedCount=0;
+    try{
+      calibrated=applyCalibration({state:calibrated,calibration:{...calibration,facts:[],activityUpdates:[]},people:input.people,turns:input.story.turns,refs:eventRefs,authorFacts:suppliedMemory.events,onAccepted:()=>{correctedCount++;}});
+      acceptedWork+=correctedCount;
+    }catch(error){
+      if(!(error instanceof InvalidCalibrationCorrection))throw error;
+      recordDiagnostic(input.diagnostic,'corrections-rejected',diagnosticError(error));
+    }
+  }
   if(factActivityRefs.size){
     const resolvedActivities=new Set(calibrated.activities.map(activity=>activity.id));
     const suppliedFactActivities=new Set(suppliedMemory.activities.map(activity=>activity.id));
@@ -373,15 +441,20 @@ export function applyDevelopment(input: DevelopmentInput, response: unknown, sel
     const old=originalActivities.get(activity.id);
     return !old||activity.status!==old.status||recordBody(activity)!==recordBody(old)||!equal(activity.participantIds,old.participantIds);
   }).map(activity=>activity.id));
-  const rhythm=mergeLifeRhythm(calibrated,input.people,data,currentClock,input.story.turns,{fillMissing:!selection?.sources});
-  // Auxiliary schedules do not turn rejected story work into a completed first flow.
   const actualChange=changed.length||addedEvents||addedKnowledge||!equal(calibrated.events,input.state.events)||!equal(calibrated.knowledge,input.state.knowledge)||!equal(calibrated.foundation,initialFoundation);
-  if(!actualChange && (submittedWork>0&&acceptedWork===0 || !(typeof data.quietReason==='string'&&data.quietReason.trim()))){
+  const quiet=typeof data.quietReason==='string'&&Boolean(data.quietReason.trim());
+  const readable=quiet||resultTables.some(value=>Array.isArray(value)?!value.length||value.some(asObject):Boolean(asObject(value)));
+  const hasNewBody=input.story.turns.some(turn=>!turn.isUser&&turn.calibrationEligible!==false&&turn.seq>(input.state.processedThroughSeq??0));
+  const noNewWork=!actualChange&&!input.initial&&input.state.automaticDevelopmentEnabled===true&&readable&&hasNewBody;
+  if(!actualChange&&!noNewWork&&(submittedWork>0&&acceptedWork===0 || !quiet)){
     recordDiagnostic(input.diagnostic,'work-rejected',{acceptedWork,submittedWork,calibrationRejections:calibrationRejections.slice(0,24),boundaryRejections:boundary.rejected.slice(0,24),boundaryRejectionCount:boundary.rejected.length});
     throw new Error(submittedWork?'本次返回的事务与经历未能接纳，尚未保存；可点百相流转重新更新。':'本次没有新的变化或明确平静说明，尚未保存，可点百相流转重新更新。');
   }
+  const rejectedProposals=noNewWork&&acceptedWork===0&&submittedWork>0;
+  if(rejectedProposals)recordDiagnostic(input.diagnostic,'no-side-story-change',{reason:'no-adoptable-proposals',throughSeq,submittedWork});
+  const rhythm=rejectedProposals?{}:mergeLifeRhythm(calibrated,input.people,data,currentClock,input.story.turns,{fillMissing:!selection?.sources});
   const savedActivities=calibrated.activities.map(activity=>(progressed.has(activity.id)||intermediateChanges.has(activity.id))&&!manual(activity)?{...activity,currentStateWindowId:window.id}:activity);
   const lastHearingWindow={id:window.id,checkpointActivityIds:savedActivities.filter(activity=>activity.currentStateWindowId===window.id).map(activity=>activity.id)};
   const state:NpcWorldState={...calibrated,...rhythm,...(input.state.worldBaseline?{worldBaseline:{...input.state.worldBaseline,needsCurrentDevelopment:false}}:{}),activities:savedActivities,lastHearingWindow,processedThroughSeq:Math.max(input.state.processedThroughSeq??0,throughSeq),currentTimeStartedThroughSeq:Math.max(input.state.currentTimeStartedThroughSeq??0,throughSeq),automaticDevelopmentEnabled:true,developmentOnstagePersonIds:boundary.onstagePersonIds,simulationRanges:[...(input.state.simulationRanges??[]),window],storyTime:referenceCurrent||olderClock?input.state.storyTime:validEnd?{text:formalClock??to.text,source}:input.initial?null:input.state.storyTime};
-  return{state:discardInvalidAtmospheres(state),window,addedEvents,addedKnowledge,changedActivities:changed.length,boundaryRejections:boundary.rejected,calibrationRejections,acceptedWork,submittedWork};
+  return{state:discardInvalidAtmospheres(state),window,addedEvents,addedKnowledge,changedActivities:changed.length,boundaryRejections:boundary.rejected,calibrationRejections,acceptedWork,submittedWork,noNewWork};
 }

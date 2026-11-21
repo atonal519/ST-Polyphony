@@ -3,10 +3,11 @@ import type { SourcePerson } from '../domain/source-people';
 import type { NpcWorldState } from '../domain/world-state';
 import { list } from './trajectory';
 
-interface Stage { key: string; index: number; sourceSeqs: number[]; onstage: Set<string> }
+export interface SceneStage { key: string; sourceSeqs: number[]; onstagePersonIds: string[]; offstagePersonIds: string[] }
+interface Stage extends SceneStage { index: number; onstage: Set<string> }
 export interface BoundaryRejection { kind: string; key: string | null; stageKey: string | null; reason: 'stage' | 'subjects' | 'story-user' | 'onstage' | 'later-event' }
 
-/** Scene ownership is declared semantically in the same answer, never inferred from names or clocks. */
+/** Scene ownership follows the stage declarations and the saved narrative boundary. */
 export function developmentBoundary(input: { people: SourcePerson[]; state: NpcWorldState; story: StoryInput; cameraPersonIds?: string[] }, data: Record<string, any>, personRefs?: ReadonlyMap<string,string>) {
   const ids = new Set(input.people.map(person => person.id));
   const userIds = new Set(input.people.filter(person => person.specialRole === 'user').map(person => person.id));
@@ -28,12 +29,19 @@ export function developmentBoundary(input: { people: SourcePerson[]; state: NpcW
       for (const id of row.offstagePersonIds) onstage.delete(id);
       for (const id of row.onstagePersonIds) onstage.add(id);
     }
-    stages.set(row.key.trim(), { key: row.key.trim(), index: stages.size, sourceSeqs:refs, onstage: new Set([...onstage, ...camera, ...userIds]) });
+    stages.set(row.key.trim(), {
+      key: row.key.trim(), index: stages.size, sourceSeqs: refs,
+      onstagePersonIds: row.onstagePersonIds, offstagePersonIds: row.offstagePersonIds,
+      onstage: new Set([...onstage, ...camera, ...userIds]),
+    });
   }
   const endpoint = new Set([...onstage, ...camera, ...userIds]);
   const stageOf = (row: Record<string, any>) => typeof row.stageKey === 'string' ? stages.get(row.stageKey) : undefined;
   return {
     onstagePersonIds: [...onstage],
+    get stages(): SceneStage[] {
+      return [...stages.values()].map(({ index, onstage, ...stage }) => stage);
+    },
     rejected,
     includesFloor(row:Record<string,any>, seq:number) {return stageOf(row)?.sourceSeqs.includes(seq)===true;},
     index(row: Record<string, any>) { return stageOf(row)?.index; },

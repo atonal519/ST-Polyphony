@@ -13,6 +13,40 @@ const event=(key,stageKey,ids)=>at(stageKey,{key,activityId:null,title:key,descr
 const reply=()=>({storyTime:{text:'中午',sourceSeqs:[3],elapsed:true},stages:stages(),events:[],activities:[],knowledge:[],quietReason:'其余时间继续原安排'});
 const input=(extra={})=>({people,state:state(),story,initial:false,...extra});
 
+test('ambiguous event keys and ungrounded facts leave independent hearing records intact',()=>{
+ const r=reply();
+ r.events=[event('repeat','back',['r']),event('repeat','back',['q']),event('independent','back',['r'])];
+ r.knowledge=[
+  at('back',{personId:'r',eventId:'repeat',reason:'引用重复无法确定'}),
+  at('back',{personId:'r',eventId:'independent',reason:'本人经历'}),
+ ];
+ r.calibration={facts:[
+  {key:'bad-fact',description:'来源不存在',participantIds:['p'],sourceSeqs:[99]},
+  {key:'good-fact',description:'正文明确交班',participantIds:['p'],sourceSeqs:[2]},
+ ],eventCorrections:[{eventId:'old',byEventId:'bad-fact',reason:'无据修改'}],knowledgeCorrections:[],activityUpdates:[]};
+ const result=applyDevelopment(input(),r);
+ assert.deepEqual(result.state.events.map(row=>row.description),['旧事实','independent','正文明确交班']);
+ assert.equal(result.state.events[0].correction,undefined);
+ assert.equal(result.state.knowledge.length,1);
+ assert.equal(result.state.knowledge[0].eventId,result.state.events[1].id);
+});
+
+test('inherited stage keys preserve scene ownership and leave ambiguous references unused',()=>{
+ const current=input(),memory=state();
+ const result=applyDevelopment(current,{events:[
+  event('offstage','away',['p']),
+  event('onstage','back',['p']),
+  event('missing-stage','s1',['r']),
+ ]},{memory,referenceStages:stages()});
+ assert.deepEqual(result.state.events.slice(1).map(row=>row.description),['offstage']);
+ assert.deepEqual(result.state.developmentOnstagePersonIds,['p']);
+ assert.deepEqual(result.boundaryRejections.map(row=>row.reason),['onstage','stage']);
+
+ const release={key:'whole-story',sourceSeqs:[2,3],onstagePersonIds:[],offstagePersonIds:['p']};
+ current.state.developmentOnstagePersonIds=['p'];
+ assert.throws(()=>applyDevelopment(current,{events:[event('missing-stage','s1',['p'])]},{memory,referenceStages:[release]}),/未能接纳/);
+});
+
 test('one formal answer protects onstage, allows a same-floor offstage gap and hands back on re-entry',async()=>{
  const r=reply();r.events=[event('in','in',['p']),event('gap','away',['p']),event('joint','away',['p','r']),event('back','back',['p']),event('other','back',['r'])];r.knowledge=[at('away',{personId:'p',eventId:'gap',reason:'亲身经历'}),at('back',{personId:'p',eventId:'back',reason:'亲身经历'})];let calls=0;
  const result=await generateDevelopment({...input(),dependencies:{materials:{async readForQuestion(){return{status:'empty',materials:[],routerText:'',coverage:{partial:false,cseStatus:'ready'}};}},model:{async request(){calls++;return r;}}}});

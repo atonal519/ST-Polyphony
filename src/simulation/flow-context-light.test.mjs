@@ -219,8 +219,9 @@ test('hearing sends only two unrelated active matters and preserves both text an
  assert.match(instructions,/同一笔房租.*沿.*ID/);
  assert.match(instructions,/修邻居的门.*独立/);
  assert.match(instructions,/纯过场只写event/);
- const row=JSON.parse(instructions.match(/\{"key":"life1"[^\n]*?\}/u)[0]);
- assert.deepEqual([row.stageKey,row.assertedPersonIds,row.assertsUser],['s1',['P1'],false]);
+ assert.match(instructions,/各项必有stageKey、assertedPersonIds和assertsUser/);
+ assert.match(instructions,/每个stageKey引用本轮实际场段/);
+ assert.doesNotMatch(instructions,/"stageKey":"s1"/);
  assert.equal(r.calls.length,1);
 });
 

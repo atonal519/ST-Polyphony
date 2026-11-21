@@ -14,7 +14,10 @@ export interface Calibration {
   activityUpdates: Array<{id?: string; key?: string; change: ActivityChange; sourceSeqs: number[]}>;
   knowledgeCorrections: Array<{personId: string; eventId: string; byEventId: string; treatment: 'invalidated' | 'retained-report'; reason: string}>;
 }
-export interface CalibrationRejection {kind:'activity';key:string|null;reason:'unknown-activity'|'activity-fields'|'activity-source'|'activity-key-conflict'}
+export type CalibrationRejection =
+  | {kind:'activity';key:string|null;reason:'unknown-activity'|'activity-fields'|'activity-source'|'activity-key-conflict'}
+  | {kind:'fact';key:string|null;reason:'fact-reference'|'fact-source'|'fact-key-conflict'};
+export class InvalidCalibrationCorrection extends Error {}
 export function modelReferenceContract(state:Pick<NpcWorldState,'activities'|'events'>,turns:StoryTurn[]) {
   return {
     sourceContract:{storySeqs:turns.map(turn=>turn.seq),calibrationSeqs:turns.filter(turn=>turn.calibrationEligible!==false).map(turn=>turn.seq),activityIds:state.activities.map(row=>row.id),eventIds:state.events.map(row=>row.id),factIds:state.events.filter(event=>historyFactSeqs(event).length).map(row=>row.id)},
@@ -78,23 +81,37 @@ export function applyCalibration(input: {state: NpcWorldState; calibration: Cali
   const providedFacts = new Map((input.authorFacts ?? []).filter(event => historyFactSeqs(event).length).map(event => [event.id, event]));
   const authorSeqs = new Set([...providedFacts.values()].flatMap(historyFactSeqs));
   // 新事实必须有本次原文；既有概况也可据本次已提供的正文事实校准。
-  const sources = (v: unknown, existingActivity = false) => { const values = Array.isArray(v) ? v : []; if (!values.length || values.some(n => !seqs.has(n) && !(existingActivity && authorSeqs.has(n)))) throw new Error('正文校准缺少可核对的正文来源，本段未保存。'); return values.map(seq => ({ kind: 'chat' as const, id: `history-floor:${seq}`, label: `第 ${seq} 楼正文` })); };
+  const sourceRefs = (v: unknown, existingActivity = false):SourceRef[]|null => {
+    if(!Array.isArray(v)||!v.length||v.some(n=>!seqs.has(n)&&!(existingActivity&&authorSeqs.has(n))))return null;
+    return v.map(seq=>({kind:'chat',id:`history-floor:${seq}`,label:`第 ${seq} 楼正文`}));
+  };
+  const missingSource='正文校准缺少可核对的正文来源，本段未保存。';
+  const sources = (v: unknown, existingActivity = false) => {
+    const evidence=sourceRefs(v,existingActivity);if(!evidence)throw new Error(missingSource);return evidence;
+  };
   const events = new Map(state.events.map(e => [e.id, e])); const refs = input.refs ?? new Map<string, string>();
   for (const raw of list(calibration.facts)) {
-    const item=returnedIdentity(raw,events);if(!item)throw new Error('正文纠正事实的引用冲突，本段未保存。');
+    const key=typeof raw.key==='string'?raw.key.trim():'';
+    const reject=(reason:Extract<CalibrationRejection,{kind:'fact'}>['reason'],message:string)=>{
+      if(!input.rejections)throw new Error(message);
+      input.rejections.push({kind:'fact',key:key||null,reason});
+    };
+    const item=returnedIdentity(raw,events);if(!item){reject('fact-reference','正文纠正事实的引用冲突，本段未保存。');continue;}
     if (item.id) {
       const old = events.get(item.id);
       const authoritative = providedFacts.get(item.id);
-      const provided = authoritative ? authoritative.sources.filter(source => source.kind === 'chat' && source.id.startsWith('history-floor:')) : sources(item.sourceSeqs);
-      if (!old || !old.sources.some(s => s.kind === 'chat' && s.id.startsWith('history-floor:') && provided.some(p => sourceSequence(p) === sourceSequence(s)))) throw new Error('纠正事实引用的正文记录无法确认，本段未保存。');
-      if(item.key&&refs.has(item.key)&&refs.get(item.key)!==item.id)throw new Error('正文纠正事实的引用重复，本段未保存。');
-      refs.set(item.id, item.id); if (item.key) refs.set(item.key, item.id); input.onReference?.(); continue;
+      const provided = authoritative ? authoritative.sources.filter(source => source.kind === 'chat' && source.id.startsWith('history-floor:')) : sourceRefs(item.sourceSeqs);
+      if(!provided){reject('fact-source',missingSource);continue;}
+      if(!old||!old.sources.some(s=>s.kind==='chat'&&s.id.startsWith('history-floor:')&&provided.some(p=>sourceSequence(p)===sourceSequence(s)))){reject('fact-reference','纠正事实引用的正文记录无法确认，本段未保存。');continue;}
+      if(key&&refs.has(key)&&refs.get(key)!==item.id){reject('fact-key-conflict','正文纠正事实的引用重复，本段未保存。');continue;}
+      refs.set(item.id,item.id);if(key)refs.set(key,item.id);input.onReference?.();continue;
     }
     if (!recordBody(item)||item.occurred===false||item.status==='planned') continue;
     const participantIds = strings(item.participantIds); if (participantIds.some(id => !people.has(id))) continue;
-    const factSources = sources(item.sourceSeqs); const id = newId();
-    if (item.key && refs.has(item.key)) throw new Error('正文纠正事实的引用重复，本段未保存。');
-    if (item.key) refs.set(item.key, id);
+    const factSources=sourceRefs(item.sourceSeqs);
+    if(!factSources){reject('fact-source',missingSource);continue;}
+    if(key&&refs.has(key)){reject('fact-key-conflict','正文纠正事实的引用重复，本段未保存。');continue;}
+    const id=newId();if(key)refs.set(key,id);
     const time = input.factTime ? input.factTime(item.storyTime) : typeof item.storyTime === 'string' ? item.storyTime : null;
     events.set(id, { id, activityId: null, description:recordBody(item), participantIds, sources: factSources, storyTime: time ? { text: time, source: factSources[0] } : null });
     input.onFactAccepted?.(item,id);
@@ -102,15 +119,15 @@ export function applyCalibration(input: {state: NpcWorldState; calibration: Cali
   }
   const resolve = (id: string) => {
     const resolved = refs.get(id) ?? id; const event = events.get(resolved);
-    if (!event || !event.sources.some(s => s.kind === 'chat' && s.id.startsWith('history-floor:') && (providedFacts.has(event.id) || seqs.has(sourceSequence(s)!)))) throw new Error('校准所依据的正文事实无法确认，本段未保存。');
+    if (!event || !event.sources.some(s => s.kind === 'chat' && s.id.startsWith('history-floor:') && (providedFacts.has(event.id) || seqs.has(sourceSequence(s)!)))) throw new InvalidCalibrationCorrection('校准所依据的正文事实无法确认，本段未保存。');
     return resolved;
   };
   const knowledge = state.knowledge.map(k => ({ ...k }));
   for (const item of list(calibration.eventCorrections)) {
-    const old = events.get(item.eventId); if (!old) throw new Error('待纠正的旧事件无法确认，本段未保存。');
+    const old = events.get(item.eventId); if (!old) throw new InvalidCalibrationCorrection('待纠正的旧事件无法确认，本段未保存。');
     if (old.sources.some(protectedSource)) {input.onAccepted?.();continue;}
-    const byEventId = resolve(item.byEventId); if (byEventId === old.id || !item.reason) throw new Error('旧事件的纠正依据不完整，本段未保存。');
-    for (const known of knowledge.filter(k => k.eventId === old.id)) if (!list(calibration.knowledgeCorrections).some(k => k.personId === known.personId && k.eventId === old.id && ['invalidated', 'retained-report'].includes(k.treatment))) throw new Error('旧知情尚未说明应保留为报告还是作废，本段未保存。');
+    const byEventId = resolve(item.byEventId); if (byEventId === old.id || !item.reason) throw new InvalidCalibrationCorrection('旧事件的纠正依据不完整，本段未保存。');
+    for (const known of knowledge.filter(k => k.eventId === old.id)) if (!list(calibration.knowledgeCorrections).some(k => k.personId === known.personId && k.eventId === old.id && ['invalidated', 'retained-report'].includes(k.treatment))) throw new InvalidCalibrationCorrection('旧知情尚未说明应保留为报告还是作废，本段未保存。');
     events.set(old.id, { ...old, correction: { byEventId, reason: item.reason } });
     input.onAccepted?.();
   }
@@ -118,8 +135,8 @@ export function applyCalibration(input: {state: NpcWorldState; calibration: Cali
     if (!people.has(item.personId)) continue;
     const known = knowledge.find(k => k.personId === item.personId && k.eventId === item.eventId);
     if (!known) continue;
-    if (known.sources.some(protectedSource)) { if (events.get(item.eventId)?.correction) throw new Error('旧知情包含人工或正文依据，无法用本次校准覆盖，本段未保存。'); input.onAccepted?.();continue; }
-    if (!['invalidated', 'retained-report'].includes(item.treatment) || !item.reason) throw new Error('旧知情的纠正处理无法确认，本段未保存。');
+    if (known.sources.some(protectedSource)) { if (events.get(item.eventId)?.correction) throw new InvalidCalibrationCorrection('旧知情包含人工或正文依据，无法用本次校准覆盖，本段未保存。'); input.onAccepted?.();continue; }
+    if (!['invalidated', 'retained-report'].includes(item.treatment) || !item.reason) throw new InvalidCalibrationCorrection('旧知情的纠正处理无法确认，本段未保存。');
     const byEventId = resolve(item.byEventId);
     const correction: KnowledgeCorrection = { byEventId, treatment: item.treatment, reason: item.reason };
     known.correction = correction;
@@ -138,7 +155,7 @@ export function applyCalibration(input: {state: NpcWorldState; calibration: Cali
     if(!item){if(!input.rejections)throw new Error('返回的临时引用重复，结果未保存，请重新更新。');input.rejections.push({kind:'activity',key:typeof raw.key==='string'?raw.key.trim():null,reason:'activity-key-conflict'});continue;}
     const reference = typeof item.id === 'string' ? item.id.trim() : '';
     const key = typeof item.key === 'string' ? item.key.trim() : '';
-    const reject=(reason:CalibrationRejection['reason'])=>input.rejections?.push({kind:'activity',key:reference||key||null,reason});
+    const reject=(reason:Extract<CalibrationRejection,{kind:'activity'}>['reason'])=>input.rejections?.push({kind:'activity',key:reference||key||null,reason});
     const id = reference ? activities.has(reference) ? reference : activityRefs.get(reference) ?? reference : activityRefs.get(key);
     const old = id ? activities.get(id) : undefined;
     // Partial acceptance is explicit; historical callers retain their strict completion contract.

@@ -180,6 +180,42 @@ test('history requester closes a missing quote only for an exact known participa
   assert.deepEqual(response.activities[0].participantIds, [id]);
 });
 
+test('a complete hearing reply keeps all records when descriptions contain unescaped dialogue quotes', async () => {
+  const content = [
+    '```json',
+    '{',
+    '  "stages":[{"key":"courtyard","sourceSeqs":["31"],"onstagePersonIds":[],"offstagePersonIds":[]}],',
+    '  "activities":[{"key":"visit","description":"他打听"老铺/新铺"的价钱。","stageKey":"courtyard","participantIds":["P1"]}],',
+    '  "events":[{"key":"visit-done","description":"店主问："想试吗？（要不要试？）"。他点了头。","activityId":"visit","participantIds":["P2"]}],',
+    '  "knowledge":[{"personId":"P1","eventId":"visit-done","reason":"本人在场"}]',
+    '}',
+    '```',
+  ].join('\n');
+  let requests = 0;
+  const client = createModelClient({ getHeaders: () => ({}), fetchImpl: async () => {
+    requests++;
+    return new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }] }));
+  } });
+  const requester = createModelRequester({ primary: profile, secondary: profile }, client);
+  const decoded = await requester.request({ task: 'development', instructions: '', input: { people: [{ id: 'visitor' }, { id: 'owner' }] } });
+  assert.equal(requests, 1);
+  assert.deepEqual(decoded.stages[0].sourceSeqs, [31]);
+  assert.deepEqual(decoded.activities[0], { key: 'visit', description: '他打听"老铺/新铺"的价钱。', stageKey: 'courtyard', participantIds: ['visitor'] });
+  assert.deepEqual(decoded.events[0], { key: 'visit-done', description: '店主问："想试吗？（要不要试？）"。他点了头。', activityId: 'visit', participantIds: ['owner'] });
+  assert.deepEqual(decoded.knowledge[0], { personId: 'visitor', eventId: 'visit-done', reason: '本人在场' });
+});
+
+test('flow description recovery preserves the existing failure path for structural errors', async () => {
+  for (const content of [
+    '{"events":[{"description":"他问"好了没"。","participantIds":["P1"]}',
+    '{"events":[{"description":"他问"好了没"。" "stageKey":"room"}]}',
+    '{"events":[{"description":"他问"好了没"。","participantIds":["P1"oops"]}]}',
+  ]) {
+    const requester = createModelRequester({ primary: profile, secondary: profile }, { async generate() { return content; } });
+    assert.equal(await requester.request({ task: 'development', instructions: '', input: { people: [{ id: 'p' }] } }), content);
+  }
+});
+
 test('trajectory uses primary 8192 tokens and maps basis, interaction and continuing-effect references without editing prose',async()=>{let sent;let tokenBudget;const requester=createModelRequester({primary:{...profile,model:'primary'},secondary:{...profile,model:'secondary'}},{async generate(chosen,messages,maxTokens){assert.equal(chosen.model,'primary');sent=JSON.parse(messages[1].content);tokenBudget=maxTokens;return {result:{initialBasis:{backgrounds:[{personId:'P2',text:'P1 is text',eventIds:[],sourceSeqs:[1]}]},intentions:[{personId:'P1',action:'P2 is text',interactionPersonIds:['P2']}],continuingEffects:[{eventId:'e',personIds:['P1']}],events:[{continuingForPersonIds:['P2']}]}};}});const response=await requester.request({task:'trajectory',instructions:'',input:{people:[{id:'a'},{id:'b'}],initialBasis:{backgrounds:[{personId:'b',text:'P2 is text'}]}}});assert.equal(tokenBudget,8192);assert.equal(sent.initialBasis.backgrounds[0].personId,'P2');assert.equal(response.result.initialBasis.backgrounds[0].personId,'b');assert.equal(response.result.initialBasis.backgrounds[0].text,'P1 is text');assert.deepEqual(response.result.intentions[0].interactionPersonIds,['b']);assert.deepEqual(response.result.continuingEffects[0].personIds,['a']);assert.deepEqual(response.result.events[0].continuingForPersonIds,['b']);assert.equal(response.result.intentions[0].action,'P2 is text');});
 
 test('history batch requests a larger output on primary and restores person references inside ordered segments',async()=>{

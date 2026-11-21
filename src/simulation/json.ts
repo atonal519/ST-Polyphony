@@ -1,3 +1,5 @@
+export const JSON_OUTPUT_RULES = '最终答复只返回一个标准 JSON 对象，直接以 { 开始并以 } 结束。字段用双引号，叙述中的引语用中文引号。数组、对象、数字和布尔值按 JSON 类型填写。提交前核对括号、逗号和引用，省去代码围栏、解释和思考。';
+
 function stripFence(source: string): string {
   const match = source.match(/```(?:json)?\s*([\s\S]*?)```/i);
   return (match ? match[1] : source).trim();

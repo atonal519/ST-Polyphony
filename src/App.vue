@@ -13,6 +13,7 @@ import {currentQQJScope} from '@/sources/qqj-readiness';
 import {createSmellGeneration} from '@/application/smell-generation';
 import type {createPluginSettings} from '@/host/plugin-settings';
 import type { DevelopmentView } from '@/application/development';
+import { watchDevelopmentFailure } from '@/ui/development-notice';
 import type { AppearancePreferences } from '@/host/appearance-settings';
 import type { AppearanceState } from '@/ui/appearance';
 import type {GeneralSettings} from '@/host/general-settings';
@@ -21,6 +22,7 @@ const props = defineProps<{ general:GeneralSettings; updates:any; renderMarkdown
 const emit = defineEmits<{ close: [restoreFocus?: boolean] }>();
 const controller = createPeopleWorld(props.dependencies);
 controller.configureDevelopment(props.enabledSettings);
+watchDevelopmentFailure(controller.developmentView);
 const history=props.dependencies.history;
 const smell=props.dependencies.publicMessages&&history?createSmellGeneration({
   repo:props.dependencies.publicMessages,getScope:currentQQJScope,
