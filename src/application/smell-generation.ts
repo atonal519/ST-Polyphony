@@ -1,5 +1,6 @@
 import {readonly,shallowRef} from 'vue';
 import type {ConfigService,ControllerDependencies,PeopleDirectoryReader,PublicMessageRepository,QuestionMaterialReader,StoryInput} from './contracts';
+import {mergeWorldPeople} from '../domain/world-foundation';
 import type {WorldSnapshot} from '../domain/world';
 import {defaultSmellSchedule,type PublicMessageRef,type SmellSchedule} from '../domain/public-messages';
 import {beginDiagnostic,recordDiagnostic,diagnosticError} from '../diagnostics/development';
@@ -132,7 +133,8 @@ export function createSmellGeneration(input:Dependencies) {
       diagnostic=beginDiagnostic(input.diagnostics,automatic?'smell-automatic':'smell-manual',{scopeId:scope,throughSeq:through});
       publish(scope,{message:'正在生成公开消息…'});
       const entries=await generatePublicMessages({
-        story,people:people.people,protectedIds:world.id===scope?world.developmentOnstagePersonIds??[]:[],
+        story,people:world.id===scope?mergeWorldPeople(people.people,world):people.people,protectedIds:world.id===scope?world.developmentOnstagePersonIds??[]:[],
+        recentEvents:world.id===scope && (world.simulationRanges?.at(-1)?.throughSeq??Infinity)<=through ? world.events.slice(-40) : undefined,
         channels:[...new Set([...refs,...(world.id===scope?world.publicMessageIndex??[]:[])].map(ref=>ref.medium))],
         creativeSeed:JSON.stringify([scope,through,automatic?'automatic':newId()]),
         materials:input.materials,diagnostic,signal:signal.signal,

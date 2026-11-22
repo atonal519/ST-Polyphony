@@ -38,6 +38,19 @@ test('projection keeps thematic titles and falls back to explicit roles for lega
  assert.deepEqual(world,before);
 });
 
+test('one circle shows a repeated background once and keeps the complete text of each change',()=>{
+ const world=namedCircleWorld(),wind=world.atmospheres[1];
+ const background='两人是多年的旧友。';
+ const longChange='他们平日碰面就能说笑。'.repeat(12)+'今天却要等同伴先开口。';
+ wind.description=background+'\n\n午餐时还能随意打趣。';
+ const second={...wind,id:'second-wind',description:background+'\r\n\r\n'+longChange};
+ world.atmospheres.push(second);
+ const before=structuredClone(world);
+ assert.ok(longChange.length>100);
+ assert.equal(tasteCircles(world)[1].description,[background,'午餐时还能随意打趣。',longChange].join('\n\n'));
+ assert.deepEqual(world,before);
+});
+
 test('multiple saved winds for one relation retain one subject title and every original description and atmosphere identity',()=>{
  const world=namedCircleWorld();
  world.atmospheres.push({...world.atmospheres[1],id:'second-wind',title:'街坊熟人圈',description:'另一段有效背景'});

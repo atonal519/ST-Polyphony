@@ -7,6 +7,7 @@ import PanelShell from '@/ui/PanelShell.vue';
 import SettingsPage from '@/ui/SettingsPage.vue';
 import FourSenses from '@/ui/FourSenses.vue';
 import DevelopmentControls from '@/ui/DevelopmentControls.vue';
+import {installHearingInjection} from '@/host/hearing-injection';
 import { subscribeStoryCompletion } from '@/host/story-completion';
 import {completedStorySeq,hasCompletedStoryReplies} from '@/host/story-history';
 import {currentQQJScope} from '@/sources/qqj-readiness';
@@ -32,6 +33,20 @@ const smell=props.dependencies.publicMessages&&history?createSmellGeneration({
   directory:props.dependencies.directory,materials:props.materialReader,config:props.config,createModelRequester:props.dependencies.createModelRequester,
   diagnostics:props.dependencies.diagnostics,world:()=>controller.state.value.world as ControllerState['world'],
 }):undefined;
+const injectHearing=ref(props.enabledSettings.hearingInjectionEnabled());
+const injectionError=ref('');
+const injection=installHearingInjection({
+  enabled:()=>props.enabledSettings.isEnabled()&&props.enabledSettings.hearingInjectionEnabled(),
+  world:()=>controller.state.value.world as ControllerState['world'],refresh:controller.refresh,
+});
+function setInjection(value:boolean) {
+  try {
+    props.enabledSettings.saveHearingInjection(value);
+    injectHearing.value=value;
+    if(!value)injection.clear();
+    injectionError.value='';
+  } catch(error) {injectionError.value=error instanceof Error?error.message:'无法保存正文注入开关。';}
+}
 let unsubscribe = () => {};
 onMounted(() => {
   const subscription=subscribeStoryCompletion((id,type,source) => {
@@ -56,7 +71,7 @@ const settings=computed(()=>page.value==='settings');
 const enabled = ref(props.enabledSettings.isEnabled());
 const operationBusy = computed(() => controller.state.value.busy);
 const enabledStore={isEnabled:()=>props.enabledSettings.isEnabled(),get:()=>({pluginEnabled:props.enabledSettings.isEnabled()}),update:(patch:{pluginEnabled:boolean})=>props.enabledSettings.saveEnabled(patch.pluginEnabled)};
-function onEnabledChange(next:boolean){enabled.value=next;if(!next){controller.stopDevelopment();smell?.stop();}props.syncFab();}
+function onEnabledChange(next:boolean){enabled.value=next;if(!next){injection.clear();controller.stopDevelopment();smell?.stop();}props.syncFab();}
 
 watch(() => props.visible, visible => { if (visible) void controller.refresh().then(controller.inspectDevelopment); }, { immediate: true });
 watch([()=>props.visible,page,()=>controller.state.value.world.id],([visible,tab])=>{
@@ -64,7 +79,7 @@ watch([()=>props.visible,page,()=>controller.state.value.world.id],([visible,tab
   if(tab==='smell')void smell?.refresh();
   else if(tab==='settings')smell?.syncScope();
 });
-onBeforeUnmount(() => { unsubscribe(); controller.stopDevelopment(); smell?.stop(); props.destroyAppearance(); });
+onBeforeUnmount(() => { unsubscribe(); injection.dispose(); controller.stopDevelopment(); smell?.stop(); props.destroyAppearance(); });
 
 const appearanceError = ref('');
 function saveHeaderAppearance(patch: Partial<AppearancePreferences>) {
@@ -93,7 +108,7 @@ function handleEscape() { if(smellOpen.value)void senses.value?.closeSmell();els
       <FourSenses ref="senses" :state="controller.state.value as ControllerState" :page="page" :visible="props.visible" :stage="stage" :panel="panel" :public-messages="props.dependencies.publicMessages" :smell="smell" :enabled="enabled" :edit-circle="editCircle" :development="controller.developmentView.value as DevelopmentView" @navigate="page=$event" @smell-open="smellOpen=$event"/>
 
     </div>
-    <SettingsPage v-show="settings" :active="settings && props.visible" :enabled="enabled" :every-replies="everyReplies" :interval-error="intervalError" :smell="smell" @interval="setEveryReplies" :busy="operationBusy" :config="props.config" :general="props.general" :updates="props.updates" :render-markdown="props.renderMarkdown" :enabled-store="enabledStore" :on-enabled-change="onEnabledChange" :preferences="preferences" :save-appearance="saveAppearance" :appearance="appearance">
+    <SettingsPage v-show="settings" :active="settings && props.visible" :enabled="enabled" :every-replies="everyReplies" :inject-hearing="injectHearing" :injection-error="injectionError" @injection="setInjection" :interval-error="intervalError" :smell="smell" @interval="setEveryReplies" :busy="operationBusy" :config="props.config" :general="props.general" :updates="props.updates" :render-markdown="props.renderMarkdown" :enabled-store="enabledStore" :on-enabled-change="onEnabledChange" :preferences="preferences" :save-appearance="saveAppearance" :appearance="appearance">
       <template #world><DevelopmentControls :state="controller.state.value as ControllerState" :development="controller.developmentView.value as DevelopmentView" :enabled="enabled" @construct="controller.constructWorld" @start="controller.startDevelopment" @stop="controller.stopDevelopment" @save="controller.saveDevelopment" @reload="controller.reloadDevelopment" /></template>
     </SettingsPage>
     </template>

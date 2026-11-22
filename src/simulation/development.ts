@@ -22,7 +22,10 @@ import {selectFlowFocus,type FlowFocus} from './flow-focus';
 import {focusCircles,focusAtmospheres,flowFoundation,flowPeople,circleEmotionContext,shortText} from './flow-context';
 import {returnedIdentity} from './returned-identity';
 import {drawAngles} from '../vendor/gouhua-vectors/draw';
+import {hearingKnowledge} from './hearing-knowledge';
+import {privateProse,readPublicCue} from './story-evidence';
 import {JSON_OUTPUT_RULES} from './json';
+import {HEARING_PROGRESS_STYLE} from './prompts';
 
 export const DEVELOPMENT_INSTRUCTIONS = `你负责共同创作“听”的参考性场外NPC日常。narrativeRoles按本批末尾已识别的镜头归属提供候选。从narrativeRoles.autonomous优先挑选能在镜头外行动的人。storyControlled里的在场人物按正文同步，回顾他们已有明确离场的时段时用对应的场段。若没有可写的场外变化，给出quietReason。优先想一件本人在镜头外会主动发起、有来由的新目标、新机遇或关系动作。用他的职责、兴趣、承诺、日程和已有结果发散，用具体细节写清他怎么选、做了什么、有什么结果。可以独自试一个办法、做一件小企划、遇见新的人，或利用资源和环境的变化。有自然交集时可以几人同行。旧事在等或在办的人也有自己的另一段生活。
 creativeAngles里的短语只是给相应人物的创作素材。可择用、组合或跳过，没抽到的人也照场景取材。角度不提供已发生的事实、参与资格或知情。candidates.storyMentions供定位正文，openMatterIds是碰到同一事项的取材线索；提名不表示在场、关系成立或已经行动。沿用已有作息，休息、等候和零新增都可以。人物目录供引用，正文校准照实同步。
@@ -32,7 +35,7 @@ creativeAngles里的短语只是给相应人物的创作素材。可择用、组
 stages有序，每项{key,sourceSeqs,onstagePersonIds,offstagePersonIds}，可同楼分段。从previousOnstagePersonIds承接，正文明确离场或镜头交接才解除，重入场交回正文；未提及或他人入场不解除原在场者。cameraPersonIds不能解除；user始终不自主。只从sourceContract.storySeqs引用楼号，calibrationEligible=false仅供时间参考，不能据此变更镜头归属或正文事实。在场者和user的未给行动、回应、缺席、去向保持未决，不编转述或目击替其定案。
 有referenceStages时，按同一批正文的场段逐字引用既有key，可省略stages。若需调整场段或补入新场段，返回所有用到的完整stages并按全文的出入场顺序排列。
 只返回JSON增量。描述内的引语用中文引号。activities、events、knowledge、continuingEffects各项必有stageKey、assertedPersonIds和assertsUser（布尔），断言涵盖直接与间接受影响的人。每个stageKey引用本轮实际场段。activities用id或新key、description、status、participantIds，状态planned/active/waiting/completed，description写终点情况、结果和具体下一步。
-events用key、description、participantIds和可空activityId，依发生顺序；事项与经历直接写正文，不返回title，经历可以多段。event.storyTime仅写已经发生且有据的时间，不超过currentClock，eventLinks的continues与caused-by区别开，event.activityChange只记当时的实际变化，不能塞回终点概况。knowledge用personId/eventId/reason，continuingEffects用eventId/personIds。人物只用输入P代号或已声明新人物key；旧活动、经历用实际给过的ID，新记录只用本答有效key。storyTime用text/sourceSeqs/elapsed，保原精度。新作息仅有依据时回routines:{personId,activeHours,tentative,basis}数组，activeHours为0–24时段，可跨夜；arrangements:{personId,kind:"active|rest",from,to,sourceSeqs}数组只同步正式正文明确的临时安排。无变化可省，平静给具体quietReason。
+events用key、description、participantIds和可空activityId，依发生顺序；事项与经历直接写正文，不返回title。${HEARING_PROGRESS_STYLE}event.storyTime仅写已经发生且有据的时间，不超过currentClock，eventLinks的continues与caused-by区别开，event.activityChange只记当时的实际变化，不能塞回终点概况。knowledge用personId/eventId/reason，continuingEffects用eventId/personIds。人物只用输入P代号或已声明新人物key；旧活动、经历用实际给过的ID，新记录只用本答有效key。storyTime用text/sourceSeqs/elapsed，保原精度。新作息仅有依据时回routines:{personId,activeHours,tentative,basis}数组，activeHours为0–24时段，可跨夜；arrangements:{personId,kind:"active|rest",from,to,sourceSeqs}数组只同步正式正文明确的临时安排。无变化可省，平静给具体quietReason。
 calibration只同步正文事实，四组按需返回：facts新项{key,description,participantIds,sourceSeqs,storyTime可选,activityId可选}，既有只用sourceContract.factIds中的id；activityUpdates:{id或新key,change:{description,status,participantIds},sourceSeqs}。正文明确推进或结清原事项时，facts写一次已发生结果，只通过facts的activityId标明所属事项，填本次activities已给的旧ID或本答确实成立的事项key。只连处理同一件事的事实。同人、同楼只是候选；一楼可以有多条事实。例：「甲交货，乙邀甲入队」拆两条：交货挂原交货ID，邀入队另写一条并省略activityId。facts的participantIds只列该条事实的直接当事人；同一事项若有新增直接当事人，在同源activityUpdates的change.participantIds明确纳入。activityUpdates的change.description只写该事项的现况。未兑现的计划只写事项，不写facts或events，也不自动知情。包括在场者和user已确定的事，只涉未登记user时显式participantIds:[]。新事实引用sourceContract.calibrationSeqs的正式楼号；已有事项还可引用已给正文事实的原楼号。eventCorrections:{eventId,byEventId,reason}只修已被推翻的旧事，byEventId取已给正文事实id或本答facts.key；旧事的每位已有知情者需给knowledgeCorrections:{personId,eventId,byEventId,treatment:"invalidated|retained-report",reason}，保实际收到过的说法，不替人物获取新事实。人工与合格正文不可覆盖，创作进展不用calibration。不要重述输入或索要新请求。`;
 
 export interface DevelopmentInput { people: SourcePerson[]; state: NpcWorldState; story: StoryInput; initial: boolean; cameraPersonIds?: string[]; diagnostic?:DiagnosticTrace }
@@ -115,7 +118,14 @@ export function developmentContext(input:DevelopmentInput,prepared:DevelopmentPr
     const progress=latestProgress.get(row.id);
     return {...row,description:progress&&recordBody(progress)===recordBody(row)?undefined:shortText(recordBody(row),750),...(progress?{latestEventId:progress.id}:{})};
   }):memory.activities;
-  const events=memory.events.map(event=>({...event,...(focus?{description:shortText(recordBody(event),650),eventLinks:event.eventLinks?.filter(ref=>selectedIds.has(ref.eventId)),activityChange:undefined}:{}),evidenceKind:factEvidenceKind(event,input.state.scopeId)}));
+  const autonomous = new Set(prepared.narrativeRoles?.autonomous.map(row=>row.personId));
+  const events=memory.events.map(event=>{
+    // A recipient only needs their recorded account of an offscreen secret. Keep its ID for references.
+    if(!options.construction && event.visibility==='private' && !event.participantIds.some(id=>autonomous.has(id))) {
+      return {id:event.id,participantIds:event.participantIds,visibility:event.visibility,evidenceKind:factEvidenceKind(event,input.state.scopeId)};
+    }
+    return {...event,...(focus?{description:shortText(recordBody(event),650),eventLinks:event.eventLinks?.filter(ref=>selectedIds.has(ref.eventId)),activityChange:undefined}:{}),evidenceKind:factEvidenceKind(event,input.state.scopeId)};
+  });
   const references=modelReferenceContract(memory,input.story.turns);
   const storyControlled=new Set(prepared.narrativeRoles?.storyControlled.map(row=>row.personId));
   const creativeAngles=options.construction||input.story.throughSeq===null?[]:drawAngles(
@@ -136,7 +146,8 @@ export function developmentContext(input:DevelopmentInput,prepared:DevelopmentPr
     circleEmotions,
     ...(options.construction?{creativeFrame:prepared.creativeFrame}:creativeAngles.length?{creativeAngles}:{}),
     atmospheres:atmospheres.map(({visual,...semantic})=>({...semantic,...(semantic.emotion?{emotionGuidance:emotionGuidance(semantic.emotion)}:{})})),narrativeRoles:prepared.narrativeRoles,restHint:prepared.restHint,
-    ...foundation,materials,
+    ...foundation,materials:options.construction ? materials : materials.map(({routerText:_,...personal})=>personal),
+    ...(options.construction ? {} : {viewpoints:hearingKnowledge(memory.events,memory.knowledge).views()}),
     ...(focus?{sourceContract:{storySeqs:references.sourceContract.storySeqs,calibrationSeqs:references.sourceContract.calibrationSeqs,factIds:references.sourceContract.factIds}}:{personContexts:memory.personContexts,...references}),
   };
 }
@@ -147,6 +158,9 @@ export async function generateDevelopment(input: DevelopmentInput & { dependenci
   const view=hearingSelection(input,prepared);
   const instructions=DEVELOPMENT_INSTRUCTIONS+'\n'+FOUNDATION_CONTRACT+`
 同答foundation.groups/relations可引用已接纳event key。从实际行动结果判断成员与关系变化，不为造圈另创行动。eventLinks须是有据延续或因果，不由同人、时间相邻推原因。
+认知隔离：先看每个行动者的 viewpoints。direct 只允许本人亲历的可观察部分；report 只允许按 knowledge.reason 中实际听到的说法行动。没有列入的旧经历对本人未知。同一件事里若有人另有心事，拆成只有本人参与的另一条经历。共同事务只表示有分工，后果落到某人头上也不代表他知道成因。story 是作者看到的正文，只把明确目击、听见、收到的部分给相应角色。个人 QQJ 记忆按材料的 personId 归人；人设、社会关系和圈内风向都不能补出秘密。
+activities / events 里有人因某件已存经历作决定时，逐人列 usesKnowledge:[{personId,eventId,as:"direct"或"report"}]。一次共同活动中，不知情的人只对眼前能看到的动作作反应。普通过日子填 []。允许知情者主动分享：先在 events 写实际发生的告知（或读到来信、收到消息），列明传递双方，每次只写确实传出去的那部分；交流事件的 usesKnowledge 填消息来自哪位知情者的哪条经历。再写 knowledge:{personId:接收人,eventId:原经历,fromPersonId:传话人,viaEventId:这条交流的key,reason:从交流事件描述中逐字摘出实际传给对方的那句话,stageKey,assertedPersonIds,assertsUser}。发出但未收到、猜中、同圈都不算。接收人之后按 report 使用，不能补齐隐去的细节。这一轮新听说后才发生的行动按先后写 events，需要更新事务时用 activityChange。
+小范围私事及私下交谈给 event.visibility:"private"。发生在公共场合且可能被正文碰上的进展，可在 event.publicCue 摘一小句（最多80字），必须逐字出自该 event.description，独立说清谁或哪里有何可见、可听的变化。屋里的私事、内心、成因、未公开交谈或计划一概省略此字段。
 ${JSON_OUTPUT_RULES}
 顶层结构如下。无条目的数组用 []。已有场段可直接引用，此时 stages 用 []。确实没有可写的场外变化时给出具体的 quietReason。
 {"stages":[],"activities":[],"events":[],"knowledge":[],"continuingEffects":[],"foundation":{"people":[],"groups":[],"relations":[]},"calibration":{"facts":[],"activityUpdates":[],"eventCorrections":[],"knowledgeCorrections":[]},"quietReason":""}
@@ -303,6 +317,14 @@ export function applyDevelopment(input: DevelopmentInput, response: unknown, sel
   const activities = new Map(authority.activities.map(activity=>[activity.id,activity]));
   const closed = new Set(authority.activities.filter(activity=>activity.status==='completed').map(activity=>activity.id));
   const identityParticipants = new Map(authority.activities.map(activity=>[activity.id,activity.participantIds]));
+  const access = hearingKnowledge(suppliedMemory.events, suppliedMemory.knowledge);
+  const knowledge:Knowledge[]=[...authority.knowledge];
+  let addedKnowledge=0;
+  const transfers=new Map<string, Record<string,any>[]>();
+  for(const claim of boundary.ordered(data.knowledge)) if(typeof claim.viaEventId==='string') {
+    const rows=transfers.get(claim.viaEventId)??[];
+    rows.push(claim); transfers.set(claim.viaEventId,rows);
+  }
   const checkpoints = new Set<string>();
   const deferred = new Map<string,{row:Record<string,any>;participants:string[]}>();
   const eventStages = new Map<string,number>();
@@ -317,6 +339,7 @@ export function applyDevelopment(input: DevelopmentInput, response: unknown, sel
     if (old && closed.has(old.id)) continue;
     const participants = strings(row.participantIds ?? row.personIds);
     if (participants.some(id=>!ids.has(id))) continue;
+    if (!access.permits(row,participants.length ? participants : old?.participantIds ?? [],eventRefs)) continue;
     // A rejected cutoff summary can still declare the identity used by an explicit earlier event.
     let declaredId:string|undefined;
     if(!old && boundary.index(row)!==undefined && typeof row.key==='string'&&row.key.trim()&&recordBody(row)&&participants.length&&Array.isArray(row.assertedPersonIds)&&row.assertedPersonIds.every((id:string)=>ids.has(id))&&row.assertsUser===false) {
@@ -353,6 +376,7 @@ export function applyDevelopment(input: DevelopmentInput, response: unknown, sel
     const pending=activityId?deferred.get(activityId):undefined;
     const statedChange=activityChange(row.activityChange,ids);
     if (!boundary.allows(row,[...participants,...(activity?.participantIds ?? pending?.participants ?? []),...(activityId?identityParticipants.get(activityId)??[]:[]),...(statedChange.participantIds ?? []),...strings(row.continuingForPersonIds)],'event')) continue;
+    if (!access.permits(row,participants,eventRefs)) continue;
     if(pending && !activity) {
       // Only an explicit first-event snapshot establishes a past activity whose cutoff summary was withheld.
       if(!statedChange.status)continue;
@@ -363,6 +387,22 @@ export function applyDevelopment(input: DevelopmentInput, response: unknown, sel
     const id=newId();bindEvent(row.key,id);
     const statedTime=asObject(row.storyTime)?.text??row.storyTime;
     const event:WorldEvent={id,activityId,description:recordBody(row),participantIds:participants,storyTime:{text:factTime(statedTime)??source.label,source},sources:[source],simulationWindowId:window.id,...(Object.keys(change).length?{activityChange:change}:{}),...(Array.isArray(row.continuingForPersonIds)?{continuingForPersonIds:strings(row.continuingForPersonIds).filter(id=>ids.has(id))}:{})};
+    const cue=readPublicCue(row);
+    if(row.visibility==='private'||row.usesKnowledge?.length||transfers.has(row.key)||privateProse.test(event.description)) event.visibility='private';
+    else if(cue) event.publicCue=cue;
+    // A handoff is effective at this point in story order, once the exchange itself was accepted.
+    for(const claim of transfers.get(row.key)??[]) {
+      const original=eventRefs.get(claim.eventId)??claim.eventId;
+      const sender=claim.fromPersonId, receiver=claim.personId;
+      if(original===id||sender===receiver||!participants.includes(sender)||!participants.includes(receiver)||
+         boundary.index(claim)!==boundary.index(row)||typeof claim.reason!=='string'||!claim.reason.trim()||!event.description.includes(claim.reason.trim())||
+         !row.usesKnowledge?.some((use:Record<string,any>)=>use.personId===sender&&(eventRefs.get(use.eventId)??use.eventId)===original)||
+         !boundary.allows(claim,[sender,receiver],'knowledge')) continue;
+      if(knowledge.some(item=>item.personId===receiver&&item.eventId===original)){submittedWork--;continue;}
+      knowledge.push({personId:receiver,eventId:original,fromPersonId:sender,viaEventId:id,reason:claim.reason.trim(),sources:[source]});
+      access.grant(original,receiver,'report'); addedKnowledge++; acceptedWork++;
+    }
+    access.register(event);
     events.push(event);addedEvents++;acceptedWork++;eventStages.set(id,boundary.index(row)!);
     newEventRows.set(id,row);
     // Returning to the same final state still anchors this period after its intermediate changes.
@@ -386,10 +426,10 @@ export function applyDevelopment(input: DevelopmentInput, response: unknown, sel
     events[events.indexOf(event)]={...event,continuingForPersonIds:[...new Set<string>(effect.personIds)]};
     acceptedWork++;
   }
-  const knowledge:Knowledge[]=[...authority.knowledge];let addedKnowledge=0;
   for(const row of boundary.ordered(data.knowledge)) {
+    if(row.viaEventId!==undefined||row.fromPersonId!==undefined)continue;
     const eventId=eventRefs.get(row.eventId)??row.eventId;
-    if(!ids.has(row.personId)||!availableEvent(eventId)||!events.some(event=>event.id===eventId)||typeof row.reason!=='string'||!row.reason.trim())continue;
+    if(!ids.has(row.personId)||!availableEvent(eventId)||!events.some(event=>event.id===eventId&&!event.correction&&event.participantIds.includes(row.personId))||typeof row.reason!=='string'||!row.reason.trim())continue;
     if(knowledge.some(item=>item.personId===row.personId&&item.eventId===eventId)){submittedWork--;continue;}
     if(!boundary.acceptsEventReference(row,eventStages.get(eventId),'knowledge')||!boundary.allows(row,[row.personId],'knowledge'))continue;
     acceptedWork++;

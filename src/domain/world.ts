@@ -63,6 +63,9 @@ export interface WorldEvent {
   activityChange?: ActivityChange;
   correction?: EventCorrection;
   continuingForPersonIds?: string[];
+  /** Short publicly observable excerpt of this event, suitable for a scene cue. */
+  publicCue?: string;
+  visibility?: 'private';
   eventLinks?: Array<{eventId:string;kind:'continues'|'caused-by'}>;
 }
 
@@ -76,6 +79,8 @@ export interface Knowledge {
   personId: string;
   eventId: string;
   reason: string;
+  fromPersonId?: string;
+  viaEventId?: string;
   sources: SourceRef[];
   correction?: KnowledgeCorrection;
 }

@@ -11,8 +11,8 @@ test('API overview keeps both usage selections and edit actions, with one global
  const html=await renderToString(createSSRApp(ModelSettings,{refreshKey:0,config:{}}));
  assert.match(html,/aria-label="主模型 API"/);assert.match(html,/aria-label="副模型 API"/);assert.match(html,/aria-label="编辑主模型 API"/);assert.match(html,/aria-label="编辑副模型 API"/);assert.equal((html.match(/新增 API/g)||[]).length,1);assert.doesNotMatch(html,/<input|另存为|重命名|测试/);
 });
-test('new API editor renders blank connection fields and retains only the original model tools without starting requests',async()=>{
+test('new API editor renders blank connection fields and six collapsed advanced parameters without starting requests',async()=>{
  const html=await renderToString(createSSRApp(ApiEditorDialog,{config:{},role:null,initial:{name:'',url:'',model:'',hasKey:false},hint:'新增不会切换用途'}));
  for(const label of ['预设名称','API 地址','API Key（留空保留已保存 Key）','模型名称'])assert.ok(html.includes(`aria-label="${label}"`));
- assert.equal((html.match(/value=""/g)||[]).length,4);assert.match(html,/拉取模型/);assert.match(html,/测试/);assert.doesNotMatch(html,/另存为|确认删除|温度|超时/);assert.match(html,/新增不会切换用途/);
+ for(const field of ['排除参数','附加参数（JSON）','超时秒数','失败重试次数','百面相温度','流式请求'])assert.ok(html.includes('aria-label="'+field+'"'));assert.match(html,/<details class="[^"]*bmx-api-advanced[^"]*">/);assert.match(html,/拉取模型/);assert.match(html,/测试/);assert.doesNotMatch(html,/另存为|确认删除/);assert.match(html,/新增不会切换用途/);
 });

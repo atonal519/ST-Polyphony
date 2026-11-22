@@ -104,8 +104,9 @@ export function tasteCircles(world:Pick<WorldSnapshot,'people'|'foundation'|'eve
  for(const mood of moods){const rows=byCircle.get(mood.circleRef!)??[];rows.push(mood);byCircle.set(mood.circleRef!,rows);}
  return circles.flatMap(circle=>{const rows=byCircle.get(circle.id)??[];if(circle.kind==='relation'&&!rows.length&&!circle.taste?.manualTitle&&!Array.isArray(circle.taste?.personIds))return [];
   const emotionValues=combineEmotions(rows.map(row=>readEmotion(row.emotion)?.values));
-  const descriptions=[...new Set(rows.map(row=>row.description).filter(text=>text.trim()))];
-  const description=descriptions.length?descriptions.join('\n\n'):Array.isArray(circle.taste?.personIds)?'成员已调整，等待新的风向。':circle.description;
+  // Each saved wind can contain a background paragraph followed by its own change.
+  const descriptions=new Set(rows.flatMap(row=>row.description.split(/\r?\n[ \t]*\r?\n/u).map(part=>part.trim()).filter(Boolean)));
+  const description=descriptions.size?[...descriptions].join('\n\n'):Array.isArray(circle.taste?.personIds)?'成员已调整，等待新的风向。':circle.description;
   return [{id:circle.id,title:rows[0]?.title??circleTitle(circle,world.people),description,personIds:circle.personIds,atmosphereIds:rows.map(row=>row.id),...(emotionValues?{emotionValues}:{}),...(rows.length===1&&rows[0].visual?{visual:rows[0].visual}:{})}];
  });
 }

@@ -19,9 +19,11 @@ export interface PublicMessageRepository {
   write(scopeId:string,window:{id:string;throughSeq:number},messages:PublicMessageDraft[],diagnostic?:DiagnosticTrace):Promise<PublicMessageRef[]>;
   read(scopeId:string,refs:PublicMessageRef[]):Promise<PublicMessageRecord[]>;
 }
-export interface ModelProfile { url: string; model: string; key: string }
-export interface PublicModelProfile { url: string; model: string; hasKey: boolean }
-export interface SharedModelPresetSummary { id: string; name: string; url: string; model: string; hasUrl: boolean; hasModel: boolean; hasKey: boolean }
+export interface ApiAdvanced { excludeParams?: string[]; additionalParams?: string; timeoutSec?: number; retryCount?: number; temperature?: number | null; stream?: boolean }
+interface ApiParameters { advanced?: ApiAdvanced }
+export interface ModelProfile extends ApiParameters { url: string; model: string; key: string }
+export interface PublicModelProfile extends ApiParameters { url: string; model: string; hasKey: boolean }
+export interface SharedModelPresetSummary extends ApiParameters { id: string; name: string; url: string; model: string; hasUrl: boolean; hasModel: boolean; hasKey: boolean }
 export interface ConfigSnapshot { primary: PublicModelProfile; secondary: PublicModelProfile; primaryPresetId: string; secondaryPresetId: string; presets: SharedModelPresetSummary[]; secondaryFollowsPrimary: boolean }
 export interface ApiEditorTarget { role: 'primary' | 'secondary'; presetId?: string }
 export interface ConfigService {

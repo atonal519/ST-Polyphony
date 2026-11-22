@@ -67,6 +67,7 @@ test('taste and construction request only missing explicit relations for display
  }}};
  for(const generate of [generateAtmosphere,generateWorldConstruction])await generate({people:ps,state:state(),story,initial:false,prepared:{materials:[],currentClock:null},dependencies});
  assert.deepEqual(calls.map(r=>r.task),['atmosphere','world-construction']);
+ assert.match(calls[0].instructions,/100字以内，background\.description和change\.description合计/);
  for(const request of calls){
   assert.deepEqual(request.input.presentationRequests,[{personId:'p',identityRelations:'q与p是同事'}]);
   assert.match(request.instructions,/presentationUpdates.*identityRelations/);

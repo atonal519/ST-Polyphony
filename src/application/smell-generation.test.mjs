@@ -120,6 +120,23 @@ test('received drafts filtered by protected character name and references get a 
   assert.equal(wire.writes.length,0);
 });
 
+test('neighborhood rumors can name two offstage NPCs while keeping the player and private material outside the draft',async()=>{
+  const people=[{id:'host',displayName:'周青',aliases:['青哥'],specialRole:'user'},
+    {id:'seller',displayName:'林岚',aliases:[],description:'她私下掌握暗号'},
+    {id:'maker',displayName:'陈川',aliases:[],description:'他怀疑掌柜'}];
+  const {controller,wire}=fixture(people);
+  const rumor={...note,medium:'传闻',type:'茶余饭后',source:'河边茶棚',
+    title:'怎么多摆了一张椅子',body:'林岚给陈川留了张椅子，旁桌就猜两人准备搭伙。卖茶的笑说，那张椅子原先就缺一条腿。',assertedPersonIds:['seller','maker']};
+  wire.reply={publicMessages:[rumor,{...rumor,body:'青哥当众说两个人要合伙了。'},
+    {...rumor,body:'林岚私下告诉陈川实情。'},{...rumor,medium:'纸媒',type:'地方小报'}]};
+  await controller.generate();
+  const [request]=wire.calls;
+  assert.equal(wire.calls.length,1);
+  assert.deepEqual(request.input.rumorCandidates.map(row=>row.personId).sort(),['maker','seller']);
+  assert.doesNotMatch(JSON.stringify(request.input),/暗号|怀疑掌柜/);
+  assert.deepEqual(wire.writes[0].entries.map(e=>e.body),[rumor.body]);
+});
+
 test('automatic cadence starts at enabling and duplicate ready floors cause one dispatch',async()=>{
   const {controller,wire}=fixture();
   await controller.setAutomatic(true);

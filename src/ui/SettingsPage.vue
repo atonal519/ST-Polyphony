@@ -8,8 +8,8 @@ import type {AppearancePreferences} from '../host/appearance-settings';
 import type {AppearanceState} from './appearance';
 import type {GeneralSettings} from '../host/general-settings';
 import type {SmellGeneration} from '../application/smell-generation';
-const props=defineProps<{active:boolean;enabled:boolean;everyReplies?:number;intervalError?:string;busy:boolean;config:ConfigService;general:GeneralSettings;updates:any;renderMarkdown:(value:string)=>string;enabledStore:any;onEnabledChange:(enabled:boolean)=>void;preferences:AppearancePreferences;saveAppearance(patch:Partial<AppearancePreferences>):void;appearance:AppearanceState;smell?:SmellGeneration}>();
-const emit=defineEmits<{interval:[value:number]}>();
+const props=defineProps<{active:boolean;enabled:boolean;everyReplies?:number;intervalError?:string;injectHearing?:boolean;injectionError?:string;busy:boolean;config:ConfigService;general:GeneralSettings;updates:any;renderMarkdown:(value:string)=>string;enabledStore:any;onEnabledChange:(enabled:boolean)=>void;preferences:AppearancePreferences;saveAppearance(patch:Partial<AppearancePreferences>):void;appearance:AppearanceState;smell?:SmellGeneration}>();
+const emit=defineEmits<{interval:[value:number];injection:[value:boolean]}>();
 const root=ref<HTMLElement>(),master=ref<HTMLElement>(),worldbooks=ref<HTMLElement>(),prompts=ref<HTMLElement>(),notice=ref<HTMLElement>();
 const apiRefreshKey=ref(0),apiOpened=ref(false);let mounted=false,dialog:any,promptView:any,masterView:any;
 function syncDialogAppearance() {
@@ -43,6 +43,8 @@ onBeforeUnmount(()=>{masterView?.dispose();promptView?.dispose();dialog?.closeAl
   <details class="settings-group"><summary class="settings-group-summary"><h3>内容设置</h3></summary><div class="settings-group-body bmx-content-settings">
    <label class="bmx-development-interval"><span>更新间隔</span><input class="settings-input settings-num" type="number" min="1" step="1" :value="everyReplies??1" aria-label="更新间隔" :aria-invalid="Boolean(intervalError)" @change="emit('interval',Number(($event.target as HTMLInputElement).value))" /></label>
    <p v-if="intervalError" class="settings-result error" role="alert">{{intervalError}}</p>
+   <label class="setting-switch bmx-smell-switch"><span>将「听」的公开线索带入正文</span><input type="checkbox" :checked="injectHearing" @change="emit('injection',($event.target as HTMLInputElement).checked)" /></label>
+   <p v-if="injectionError" class="settings-result error" role="alert">{{injectionError}}</p>
    <template v-if="smell">
     <label class="setting-switch bmx-smell-switch"><span>嗅自动新增（当前聊天）</span><input type="checkbox" :disabled="!smell.view.value.scopeId" :checked="smell.view.value.schedule.enabledAfter!==null" @change="smell.setAutomatic(($event.target as HTMLInputElement).checked)" /></label>
     <label class="bmx-development-interval"><span>嗅的间隔（正文回复数）</span><input class="settings-input settings-num" type="number" min="1" step="1" :disabled="!smell.view.value.scopeId" :value="smell.view.value.schedule.everyReplies" @change="smell.setInterval(Number(($event.target as HTMLInputElement).value))" /></label>

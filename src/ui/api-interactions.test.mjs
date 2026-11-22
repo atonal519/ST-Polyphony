@@ -65,6 +65,29 @@ test('real Vue followed editor saves its captured preset with newest blank key a
   assert.equal(f.state.presets[0].model,'edited-model');assert.equal(f.state.presets[0].key,'rotated-key');assert.equal(f.state.presets[0].url,'https://changed-by-other.invalid/v1');assert.equal(f.state.presets[0].extra,'keep');
  }finally{f.host.cleanup();}
 });
+test('advanced parameters can be corrected, saved and reopened from either followed role',async()=>{
+ const f=await mount();
+ try{
+  f.query('编辑副模型 API').fire('click');await settle();
+  f.host.root.querySelector('.bmx-api-advanced').querySelector('summary').fire('click');
+  await f.input('排除参数','top_p，presence_penalty\ntop_p');
+  await f.input('附加参数（JSON）','{"thinking":');
+  await f.input('超时秒数','45');
+  await f.input('失败重试次数','2');
+  await f.input('百面相温度','0');
+  const stream=f.query('流式请求');stream.checked=true;stream.fire('change');
+  await f.click('保存');
+  assert.equal(f.state.writes,0);assert.match(f.host.root.textContent,/JSON 对象/);
+  await f.input('附加参数（JSON）','{"thinking":{"type":"disabled"}}');
+  await f.click('保存');
+  assert.equal(f.query('模型名称'),null);
+  const advanced={additionalParams:'{"thinking":{"type":"disabled"}}',excludeParams:['top_p','presence_penalty'],timeoutSec:45,retryCount:2,temperature:0,stream:true};
+  assert.deepEqual((await f.state.config.getProfile('primary')).advanced,advanced);
+  f.query('编辑主模型 API').fire('click');await settle();
+  assert.equal(f.query('附加参数（JSON）').value,advanced.additionalParams);
+  assert.equal(f.query('流式请求').checked,true);
+ }finally{f.host.cleanup();}
+});
 test('real Vue save failure retains fields and allows same draft to save once',async()=>{
  const f=await mount();try{
   f.query('编辑主模型 API').fire('click');await settle();await f.input('模型名称','retained-draft');f.state.fail=true;await f.click('保存');
@@ -123,13 +146,13 @@ test('late getConfig cannot reopen editor after leaving; closing/reopening the p
 test('real dialog Tab reaches the model summary forward and backward, including collapsed lists',async()=>{
  const f=await mount(),previous=globalThis.fetch;globalThis.fetch=async()=>new Response(JSON.stringify({data:[{id:'one'}]}),{status:200});
  try{
-  f.query('编辑主模型 API').fire('click');await settle();await f.click('拉取模型');
+  f.query('编辑主模型 API').fire('click');await settle();await f.click('拉取模型');await new Promise(resolve=>setImmediate(resolve));await settle();
   const search=f.query('搜索模型'),summary=f.host.root.querySelector('.bmx-model-list-summary'),fetch=f.buttons('拉取模型')[0];
   search.focus();search.fire('keydown',{key:'Tab',shiftKey:true});assert.ok(f.host.root.activeElement===summary,'unexpected Tab focus');
   summary.fire('keydown',{key:'Tab',shiftKey:true});assert.ok(f.host.root.activeElement===fetch,'unexpected Tab focus');
   fetch.fire('keydown',{key:'Tab'});assert.ok(f.host.root.activeElement===summary,'unexpected Tab focus');
   summary.fire('keydown',{key:'Tab'});assert.ok(f.host.root.activeElement===search,'unexpected Tab focus');
-  summary.fire('click');assert.equal(summary.parent.props.open,false);summary.focus();summary.fire('keydown',{key:'Tab'});assert.ok(f.host.root.activeElement===f.buttons('测试')[0],'collapsed model list must skip its hidden inputs');
+  summary.fire('click');assert.equal(summary.parent.props.open,false);summary.focus();summary.fire('keydown',{key:'Tab'});const advanced=f.host.root.activeElement;assert.equal(advanced.textContent,'高级参数');advanced.fire('keydown',{key:'Tab'});assert.ok(f.host.root.activeElement===f.buttons('测试')[0],'both collapsed lists must skip hidden inputs');
   summary.focus();summary.fire('keydown',{key:'Enter'});assert.equal(summary.parent.props.open,true);summary.fire('keydown',{key:'Tab'});assert.ok(f.host.root.activeElement===search,'unexpected Tab focus');
  }finally{globalThis.fetch=previous;f.host.cleanup();}
 });

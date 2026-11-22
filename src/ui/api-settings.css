@@ -24,7 +24,7 @@
 .bmx-api-purpose>span{color:var(--bmx-api-soft);font-size:var(--api-body);font-weight:600}
 .bmx-api-purpose-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:var(--api-group);min-width:0}
 .bmx-api-purpose-row>.bmx-inline-select{min-width:0}
-.bmx-api-editor input.bmx-api-input,.bmx-api-dialog-overlay input.bmx-api-input,.bmx-api-dialog-input{
+.bmx-api-editor input.bmx-api-input,.bmx-api-dialog-overlay input.bmx-api-input,.bmx-api-dialog-overlay textarea.bmx-api-input,.bmx-api-dialog-input{
   box-sizing:border-box;width:100%;min-width:0;min-height:var(--qqj-control-height);margin:0;
   padding:var(--qqj-control-pad-y) var(--qqj-control-pad-x);border:1px solid var(--bmx-api-line);border-radius:var(--qqj-radius-control);
   background:var(--bmx-api-panel);color:var(--bmx-api-ink);
@@ -73,6 +73,8 @@
 .bmx-api-config-fields>.bmx-api-actions{margin:0}
 .bmx-api-dialog-overlay button.bmx-api-danger{color:var(--bmx-api-crimson)}
 .bmx-api-dialog-overlay .bmx-model-list-section{min-width:0;padding:var(--api-group);border:1px solid var(--bmx-api-line);border-radius:10px}
+.bmx-api-advanced[open]>div{margin-top:var(--api-group)}
+.bmx-api-advanced textarea.bmx-api-input{height:auto;resize:vertical;font-family:inherit}
 .bmx-model-list-summary{cursor:pointer;color:var(--bmx-api-soft);font-size:var(--api-caption)}
 .bmx-model-list-items{display:grid;gap:var(--api-small);max-height:180px;overflow:auto;overscroll-behavior:contain;touch-action:pan-y;margin-top:var(--api-group)}
 .bmx-api-dialog-overlay button.bmx-model-list-item{width:100%;text-align:left;justify-content:flex-start;overflow-wrap:anywhere;border-radius:6px;color:var(--bmx-api-ink);font-weight:400}

@@ -175,7 +175,7 @@ test('hearing rewrites events and knowledge through accepted aliases and still e
    return {stages:[stage(protection==='onstage'?[r.qqj]:[])],foundation:graph(rows),
     events:[{key:'remote-event',description:'做了一次小检查。',...claims([r.qqj,r.stable])},
      {key:'other-event',description:'陈晓取回料单。',...claims([r.other])}],
-    knowledge:[{personId:r.qqj,eventId:'other-event',reason:'当面听见交接。',...claims([r.qqj])}]};
+    knowledge:[{personId:r.qqj,eventId:'remote-event',reason:'亲自做过检查。',...claims([r.qqj])}]};
   });
   const result=await generateDevelopment({...input,...(protection==='camera'?{cameraPersonIds:[remote.id]}:{}),dependencies:mock.dependencies});
   const admitted=['offstage','invalid-source','invalid-supplement'].includes(protection);

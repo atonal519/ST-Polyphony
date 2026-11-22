@@ -21,6 +21,17 @@ export function createPluginSettings(getContext = getHostContext) {
       settings['st-dollars']={...own,smellSchedules:{...schedules,[scopeId]:schedule}};
       context.saveSettingsDebounced();
     },
+    hearingInjectionEnabled():boolean {
+      const own=getContext()?.extensionSettings?.['st-dollars'] as Record<string,unknown>|undefined;
+      return own?.hearingInjection===true;
+    },
+    saveHearingInjection(enabled:boolean) {
+      const context=getContext(),settings=context?.extensionSettings;
+      if(!settings||typeof context?.saveSettingsDebounced!=='function')throw Error('无法保存正文注入开关。');
+      const own=settings['st-dollars'];
+      settings['st-dollars']={...(own&&typeof own==='object'?own:{}),hearingInjection:enabled};
+      context.saveSettingsDebounced();
+    },
     getEveryReplies(): number {
       const own = getContext()?.extensionSettings?.['st-dollars'] as Record<string, unknown> | undefined;
       const value = own?.developmentEveryReplies;

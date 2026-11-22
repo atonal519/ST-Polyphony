@@ -1,11 +1,13 @@
 import type { ConfigService, ModelProfile, SharedModelPresetSummary } from '../application/contracts';
+import { advancedFields } from './advanced';
+import type { SharedApiPreset } from '../host/api-pool';
 import { createSharedApiPreset, deleteSharedApiPreset, readSharedApiPresets, renameSharedApiPreset, updateSharedApiPreset } from '../host/api-pool';
 import { createBainiaoClient } from '../storage/bainiao-client';
 
 type Settings = { primary?: Partial<ModelProfile>; secondary?: Partial<ModelProfile>; primaryPresetId?: string; secondaryPresetId?: string; secondaryFollowsPrimary?: boolean; [key: string]: unknown };
 const clean = (value: unknown) => typeof value === 'string' ? value.trim() : '';
-const usable = (profile: Partial<ModelProfile> | undefined): ModelProfile | null => profile && clean(profile.url) && clean(profile.model) && clean(profile.key) ? { url: clean(profile.url), model: clean(profile.model), key: clean(profile.key) } : null;
-const summary = (preset: { id: string; name: string; url: string; model: string; key: string }): SharedModelPresetSummary => ({ id: preset.id, name: preset.name, url: preset.url, model: preset.model, hasUrl: Boolean(preset.url), hasModel: Boolean(preset.model), hasKey: Boolean(preset.key) });
+const usable = (profile: Partial<ModelProfile> | undefined): ModelProfile | null => profile && clean(profile.url) && clean(profile.model) && clean(profile.key) ? { url: clean(profile.url), model: clean(profile.model), key: clean(profile.key), ...(profile.advanced && { advanced: profile.advanced }) } : null;
+const summary = (preset: SharedApiPreset): SharedModelPresetSummary => ({ id: preset.id, name: preset.name, url: preset.url, model: preset.model, hasUrl: Boolean(preset.url), hasModel: Boolean(preset.model), hasKey: Boolean(preset.key), ...(preset.advanced && { advanced: preset.advanced }) });
 const invalidPreset = () => new Error('所选共享 API 预设已失效或配置不完整，请重新选择或在共享 API 池中补齐。');
 
 export function createConfigService(client = createBainiaoClient(), readPresets = readSharedApiPresets, pool = { update: updateSharedApiPreset, create: createSharedApiPreset, delete: deleteSharedApiPreset, rename: renameSharedApiPreset }): ConfigService {
@@ -35,10 +37,10 @@ export function createConfigService(client = createBainiaoClient(), readPresets 
       const presetId = captured ? clean(captured.presetId) : clean(target === 'primary' ? settings.primaryPresetId : settings.secondaryPresetId);
       if (presetId) {
         const preset = findPreset(presetId, readPresets());
-        return { url: clean(preset.url), model: clean(preset.model), key: clean(preset.key) };
+        return { url: clean(preset.url), model: clean(preset.model), key: clean(preset.key), ...(preset.advanced && { advanced: preset.advanced }) };
       }
       const profile = target === 'primary' ? settings.primary ?? settings.secondary : settings.secondary;
-      return { url: clean(profile?.url), model: clean(profile?.model), key: clean(profile?.key) };
+      return { url: clean(profile?.url), model: clean(profile?.model), key: clean(profile?.key), ...(profile?.advanced && { advanced: profile.advanced }) };
     },
     async getProfiles() {
       const { settings } = await read();
@@ -55,7 +57,7 @@ export function createConfigService(client = createBainiaoClient(), readPresets 
       const presets = readPresets();
       const independentPrimary = usable(settings.primary) ?? (!settings.primaryPresetId ? usable(settings.secondary) : null);
       const independentSecondary = usable(settings.secondary);
-      const mask = (profile: ModelProfile | null) => ({ url: profile?.url ?? '', model: profile?.model ?? '', hasKey: Boolean(profile?.key) });
+      const mask = (profile: ModelProfile | null) => ({ url: profile?.url ?? '', model: profile?.model ?? '', hasKey: Boolean(profile?.key), ...(profile?.advanced && { advanced: profile.advanced }) });
       const secondaryFollowsPrimary = settings.secondaryFollowsPrimary === true || (settings.secondaryFollowsPrimary !== false && !clean(settings.secondaryPresetId) && !settings.secondary);
       return {
         primary: mask(independentPrimary), secondary: mask(independentSecondary),
@@ -66,7 +68,7 @@ export function createConfigService(client = createBainiaoClient(), readPresets 
     async saveConfig(input) {
       const current = await read();
       const merge = (old: Partial<ModelProfile> | undefined, patch: Partial<ModelProfile> | undefined): ModelProfile => ({
-        url: clean(patch?.url ?? old?.url), model: clean(patch?.model ?? old?.model), key: clean(patch?.key) || clean(old?.key),
+        url: clean(patch?.url ?? old?.url), model: clean(patch?.model ?? old?.model), key: clean(patch?.key) || clean(old?.key), ...advancedFields(old?.advanced, patch?.advanced),
       });
       const settings: Settings = { ...current.settings, secondaryFollowsPrimary: input.secondaryFollowsPrimary };
       const primaryPresetId = clean(input.primaryPresetId);
@@ -113,11 +115,11 @@ export function createConfigService(client = createBainiaoClient(), readPresets 
         const profile = { url: clean(input.url ?? currentProfile.url), model: clean(input.model ?? currentProfile.model), key: clean(input.key) || currentProfile.key };
         if (!profile.url || !profile.model || !profile.key) throw new Error('请填写 API 地址、模型名和 Key。');
         if (input.name !== undefined && !clean(input.name)) throw new Error('请输入预设名称。');
-        await pool.update(presetId, { ...profile, ...(input.name !== undefined ? { name: clean(input.name) } : {}) });
+        await pool.update(presetId, { ...profile, ...(input.advanced && advancedFields(currentProfile.advanced, input.advanced)), ...(input.name !== undefined ? { name: clean(input.name) } : {}) });
         return;
       }
       const currentProfile = target === 'primary' ? current.settings.primary ?? current.settings.secondary : current.settings.secondary;
-      const profile = { url: clean(input.url ?? currentProfile?.url), model: clean(input.model ?? currentProfile?.model), key: clean(input.key) || clean(currentProfile?.key) };
+      const profile = { url: clean(input.url ?? currentProfile?.url), model: clean(input.model ?? currentProfile?.model), key: clean(input.key) || clean(currentProfile?.key), ...advancedFields(currentProfile?.advanced, input.advanced) };
       if (!profile.url || !profile.model || !profile.key) throw new Error(`请填写${target === 'primary' ? '主' : '副'}模型 API 地址、模型名和首次使用所需的 Key。`);
       await client.put('settings', 'api', { ...current.settings, [target]: profile }, current.revision);
     },
@@ -130,7 +132,7 @@ export function createConfigService(client = createBainiaoClient(), readPresets 
       const oldPresetId = captured ? clean(captured.presetId) : clean(target === 'primary' ? current.settings.primaryPresetId : current.settings.secondaryPresetId);
       const old = oldPresetId ? findPreset(oldPresetId, readPresets()) : null;
       const oldOwn = target === 'primary' ? current.settings.primary ?? current.settings.secondary : current.settings.secondary;
-      const profile = { url: clean(input.url), model: clean(input.model), key: clean(input.key) || clean(old?.key ?? oldOwn?.key) };
+      const profile = { url: clean(input.url), model: clean(input.model), key: clean(input.key) || clean(old?.key ?? oldOwn?.key), ...advancedFields((old ?? oldOwn)?.advanced, input.advanced) };
       if (!profile.url || !profile.model || !profile.key) throw new Error('请填写 API 地址、模型名和首次使用所需的 Key。');
       await pool.create({ id, name: cleanName, ...profile }, oldPresetId);
       if (options.select === false) return id;
@@ -141,7 +143,7 @@ export function createConfigService(client = createBainiaoClient(), readPresets 
       return id;
     },
     async createPreset(name, input) {
-      const label = clean(name), profile = { url: clean(input.url), model: clean(input.model), key: clean(input.key) };
+      const label = clean(name), profile = { url: clean(input.url), model: clean(input.model), key: clean(input.key), ...advancedFields(undefined, input.advanced) };
       if (!label) throw new Error('请输入预设名称。');
       if (!profile.url || !profile.model || !profile.key) throw new Error('请填写 API 地址、模型名和首次使用所需的 Key。');
       const id = `dollars-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

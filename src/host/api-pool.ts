@@ -1,6 +1,7 @@
+import type { ApiAdvanced } from '../application/contracts';
 import { getHostContext } from './host-context';
 
-export interface SharedApiPreset { id: string; name: string; url: string; key: string; model: string }
+export interface SharedApiPreset { id: string; name: string; url: string; key: string; model: string; advanced?: ApiAdvanced }
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -14,7 +15,7 @@ export function readSharedApiPresets(context = getHostContext()): SharedApiPrese
   return list.flatMap(value => {
     if (!object(value)) return [];
     const id = text(value.id);
-    return id ? [{ id, name: text(value.name) || '未命名预设', url: text(value.url), key: text(value.key), model: text(value.model) }] : [];
+    return id ? [{ id, name: text(value.name) || '未命名预设', url: text(value.url), key: text(value.key), model: text(value.model), ...(object(value.polyphonyAdvanced) ? { advanced: value.polyphonyAdvanced as ApiAdvanced } : {}) }] : [];
   });
 }
 
@@ -65,11 +66,12 @@ async function savePool(pool: ReturnType<typeof mutablePool>, items: unknown[]) 
   }
 }
 
-export async function updateSharedApiPreset(id: string, patch: { url: string; key: string; model: string; name?: string }): Promise<void> {
+export async function updateSharedApiPreset(id: string, patch: { url: string; key: string; model: string; name?: string; advanced?: ApiAdvanced }): Promise<void> {
   const pool = mutablePool(); let found = false;
   const apiPresets = pool.items.map(item => {
     if (!object(item) || text(item.id) !== id) return item;
-    found = true; return { ...item, ...patch };
+    const { advanced, ...connection } = patch;
+    found = true; return { ...item, ...connection, ...(advanced ? { polyphonyAdvanced: advanced } : {}) };
   });
   if (!found) throw new Error('所选共享 API 预设已失效，请重新选择。');
   await savePool(pool, apiPresets);
@@ -77,7 +79,8 @@ export async function updateSharedApiPreset(id: string, patch: { url: string; ke
 
 export async function createSharedApiPreset(preset: SharedApiPreset, baseId = ''): Promise<void> {
   const pool = mutablePool(true), base = pool.items.find(item => object(item) && text(item.id) === baseId);
-  await savePool(pool, [...pool.items, { ...(object(base) ? base : {}), ...preset }]);
+  const { advanced, ...connection } = preset;
+  await savePool(pool, [...pool.items, { ...(object(base) ? base : {}), ...connection, ...(advanced ? { polyphonyAdvanced: advanced } : {}) }]);
 }
 
 export async function deleteSharedApiPreset(id: string): Promise<void> {
